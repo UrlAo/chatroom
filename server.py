@@ -20,9 +20,13 @@ def handle_client(client_socket, client_address):
                 break
 
             msg = message.decode()
-            print(f"{username}：{msg}")
-
-            broadcast(f"{username}：{msg}", client_socket)
+            # 处理在线用户列表命令
+            if msg == "/online":
+                online_list = ", ".join(clients.values())
+                client_socket.send(f"【在线用户】{online_list}".encode())
+            else:
+                print(f"{username}：{msg}")
+                broadcast(f"{username}：{msg}", client_socket)
 
     except:
         pass
@@ -44,7 +48,7 @@ def broadcast(message, exclude_socket=None):
             except:
                 pass
 
-# =============== 服务器启动 ===============
+# ================= 服务器启动 =================
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server_socket.bind(("127.0.0.1", 8888))
 server_socket.listen(5)
