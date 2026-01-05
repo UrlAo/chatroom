@@ -1,6 +1,7 @@
 import socket
 import threading
 import struct
+import os
 #我是张东健
 def recv_all(sock, size):
     data = b''
