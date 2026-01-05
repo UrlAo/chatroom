@@ -1,7 +1,7 @@
 import socket
 import threading
 import struct
-
+#我是张东健
 def recv_all(sock, size):
     data = b''
     while len(data) < size:
