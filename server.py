@@ -1,15 +1,45 @@
 import socket
 import threading
+import struct
 
 # 保存在线客户端：socket -> username
 clients = {}
+
+def recv_all(sock, size):
+    data = b''
+    while len(data) < size:
+        packet = sock.recv(size - len(data))
+        if not packet:
+            return None
+        data += packet
+    return data
+
+def recv_message(sock):
+    raw_len = recv_all(sock, 4)
+    if not raw_len:
+        return None
+    msg_len = struct.unpack('!I', raw_len)[0]
+    return recv_all(sock, msg_len).decode()
+
+def send_message(sock, message):
+    data = message.encode()
+    length = struct.pack('!I', len(data))
+    sock.sendall(length + data)
+
+def broadcast(message, exclude_socket=None):
+    for client in clients:
+        if client != exclude_socket:
+            try:
+                client.send(message.encode())
+            except:
+                pass
 
 def handle_client(client_socket, client_address):
     try:
         # 1. 接收用户名
         username = client_socket.recv(1024).decode()
         clients[client_socket] = username
-        print(f"{username} 上线了")
+        print(f"{username} 上线了！")
 
         # 通知其他人
         broadcast(f"【系统】{username} 进入了聊天室", client_socket)
@@ -20,13 +50,14 @@ def handle_client(client_socket, client_address):
                 break
 
             msg = message.decode()
-            # 处理在线用户列表命令
             if msg == "/online":
-                online_list = ", ".join(clients.values())
+                online_list = ",".join(clients.values())
                 client_socket.send(f"【在线用户】{online_list}".encode())
             else:
                 print(f"{username}：{msg}")
-                broadcast(f"{username}：{msg}", client_socket)
+                broadcast(f"{username}：{msg}",client_socket)
+
+            broadcast(f"{username}：{msg}", client_socket)
 
     except:
         pass
@@ -40,17 +71,11 @@ def handle_client(client_socket, client_address):
 
         client_socket.close()
 
-def broadcast(message, exclude_socket=None):
-    for client in clients:
-        if client != exclude_socket:
-            try:
-                client.send(message.encode())
-            except:
-                pass
 
-# ================= 服务器启动 =================
+
+# =============== 服务器启动 ===============
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server_socket.bind(("127.0.0.1", 8888))
+server_socket.bind(("0.0.0.0", 8888))
 server_socket.listen(5)
 
 print("聊天室服务器启动，等待客户端连接...")
