@@ -52,16 +52,16 @@ def handle_client(client_socket, client_address):
         broadcast(f"【系统】{username} 进入了聊天室", client_socket)
 
         while True:
-            message = client_socket.recv(1024)
-            if not message:
+            msg = recv_message(client_socket)   # ★关键
+            if not msg:
                 break
 
-            msg = message.decode()
             if msg == "/quit":
-                # 客户端主动请求退出
                 break
+
             print(f"{username}：{msg}")
             broadcast(f"{username}：{msg}", client_socket)
+
 
     except:
         pass

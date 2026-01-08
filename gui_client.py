@@ -39,13 +39,14 @@ class ChatClientGUI:
         self.messages_label = tk.Label(main_frame, text="聊天消息:")
         self.messages_label.pack(anchor="w")
 
-        self.messages_display = scrolledtext.ScrolledText(
+        self.messages_display = scrolledtext.ScrolledText(   # 消息显示区域
             main_frame,
             wrap=tk.WORD,
             state=tk.DISABLED,
             height=20
         )
-        self.messages_display.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        self.messages_display.pack(
+            fill=tk.BOTH, expand=True, pady=(0, 10))  # 消息显示区域
 
         # 输入区域
         input_frame = tk.Frame(main_frame)
@@ -109,15 +110,18 @@ class ChatClientGUI:
                 socket.AF_INET, socket.SOCK_STREAM)
             self.client_socket.connect((server_ip, server_port))
 
+            # 保存用户名
+            self.username = username
             # 发送用户名
             self.send_message_raw(username)
+
+            self.connected = True   # ★关键：一定要在启动线程前
 
             # 启动接收线程
             self.receive_thread = threading.Thread(
                 target=self.receive_messages, daemon=True)
             self.receive_thread.start()
 
-            self.connected = True
             self.update_status(
                 f"已连接到 {server_ip}:{server_port} - 用户名: {username}")
             self.append_message("系统: 已成功连接到聊天室")
@@ -144,14 +148,17 @@ class ChatClientGUI:
             self.update_status("已断开连接")
             self.append_message("系统: 已断开与聊天室的连接")
 
-    def send_message(self, event=None):
+    def send_message(self, event=None):  # 发送消息
         if not self.connected:
             messagebox.showwarning("警告", "未连接到服务器！")
             return
 
-        message = self.message_entry.get().strip()
+        message = self.message_entry.get().strip()  # 获取输入消息并去除首尾空格
         if message:
             try:
+                # 在本地显示自己的消息
+                self.append_message(f"{self.username}：{message}")
+
                 self.send_message_raw(message)
                 self.message_entry.delete(0, tk.END)
 
@@ -162,11 +169,13 @@ class ChatClientGUI:
             except Exception as e:
                 messagebox.showerror("发送错误", f"发送消息失败: {str(e)}")
 
-    def send_message_raw(self, message):
+    def send_message_raw(self, message):  # 发送原始消息
         """发送原始消息到服务器"""
         data = message.encode()
         length = struct.pack('!I', len(data))
         self.client_socket.send(length + data)
+        # self 代表类的当前实例（对象）
+        # 它是类中方法的第一个参数，指向调用该方法的具体对象
 
     def receive_messages(self):
         """接收来自服务器的消息"""
@@ -179,13 +188,9 @@ class ChatClientGUI:
                     break
 
                 msg_len = struct.unpack('!I', raw_len)[0]
-                self.append_message(
-                    f"调试: 接收到消息长度 {msg_len}", is_debug=True)  # 调试信息
 
                 # 接收消息内容
                 message = self.recv_all(msg_len).decode()
-                self.append_message(
-                    f"调试: 接收到消息内容 '{message}'", is_debug=True)  # 调试信息
 
                 # 在主线程中更新UI
                 self.master.after(0, self.append_message, message, False)
