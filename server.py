@@ -44,8 +44,8 @@ def broadcast(message, exclude_socket=None):
 def handle_client(client_socket, client_address):
     try:
         # 1. 接收用户名
-        username = client_socket.recv(1024).decode()
-        clients[client_socket] = username
+        username = recv_message(client_socket)   # 接收用户名
+        clients[client_socket] = username   # 保存客户端和用户名的映射
         print(f"{username} 上线了！")
 
         # 通知其他人
@@ -110,12 +110,21 @@ def server_console():
                 print("  在线用户: 无")
         elif cmd == "kick":
             if args:
-                target_user = args[0]
-                kicked = False
+                target_user = args[0]  # 目标用户名
+                print(f"调试信息: 尝试踢出用户 '{target_user}'")  # 调试信息
+                print(f"调试信息: 当前在线用户 {list(clients.values())}")  # 调试信息
+                kicked = False  # 标记是否成功踢出用户
                 # 使用 list(clients.items()) 创建快照以避免在迭代时修改字典
-                for client_socket, username in list(clients.items()):
+                for client_socket, username in list(clients.items()):  # 遍历客户端连接
+                    # 调试信息
+                    print(f"调试信息: 检查用户 '{username}' 与目标 '{target_user}'")
                     if username == target_user:
                         try:
+                            # 先向被踢出的用户发送通知
+                            try:
+                                send_message(client_socket, "【系统】您已被管理员踢出聊天室")
+                            except:
+                                pass  # 如果发送失败也继续执行
                             # 通知其他用户该用户被踢出
                             broadcast(
                                 f"【系统】{username} 被管理员踢出聊天室", client_socket)
