@@ -20,6 +20,14 @@ def recv_message(sock):    # 接收消息
     msg_len = struct.unpack('!I', raw_len)[0]
     return recv_all(sock, msg_len).decode()
 
+    
+def recv_message(sock):    # 接收消息
+    raw_len = recv_all(sock, 4)
+    if not raw_len:
+        return None
+    msg_len = struct.unpack('!I', raw_len)[0]
+    return recv_all(sock, msg_len).decode()
+
 
 def send_message(sock, message):    # 发送消息
     data = message.encode()
