@@ -111,13 +111,11 @@ def server_console():
         elif cmd == "kick":
             if args:
                 target_user = args[0]  # 目标用户名
-                print(f"调试信息: 尝试踢出用户 '{target_user}'")  # 调试信息
-                print(f"调试信息: 当前在线用户 {list(clients.values())}")  # 调试信息
+
                 kicked = False  # 标记是否成功踢出用户
                 # 使用 list(clients.items()) 创建快照以避免在迭代时修改字典
                 for client_socket, username in list(clients.items()):  # 遍历客户端连接
                     # 调试信息
-                    print(f"调试信息: 检查用户 '{username}' 与目标 '{target_user}'")
                     if username == target_user:
                         try:
                             # 先向被踢出的用户发送通知
