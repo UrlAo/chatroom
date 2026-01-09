@@ -234,6 +234,12 @@ class ChatServerGUI:
                         # 格式不正确，当作普通消息处理
                         self.append_message(f"{username}：{msg}")
                         self.broadcast(f"{username}：{msg}", client_socket)
+                elif msg.startswith('/FILE|'):
+                    # 处理文件传输消息
+                    # 格式：/FILE|filename|filesize|base64data
+                    self.append_message(f"{username} 发送了一个文件")
+                    # 广播文件消息给其他客户端（包括发送者）
+                    self.broadcast(f"{username}：{msg}", None)
                 else:
                     # 普通群聊消息
                     self.append_message(f"{username}：{msg}")
