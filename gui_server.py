@@ -195,6 +195,11 @@ class ChatServerGUI:
             # 通知其他人
             self.broadcast(f"【系统】{username} 进入了聊天室", client_socket)
 
+            # 向新连接的客户端发送当前在线用户列表
+            current_users = list(self.clients.values())
+            user_list_msg = "/USERLIST|" + "|".join(current_users)
+            self.send_message(client_socket, user_list_msg)
+
             # 循环接收消息
             while self.running:
                 msg = self.recv_message(client_socket)
@@ -240,6 +245,11 @@ class ChatServerGUI:
                     self.append_message(f"{username} 发送了一个文件")
                     # 广播文件消息给其他客户端（包括发送者）
                     self.broadcast(f"{username}：{msg}", None)
+                elif msg == '/REQUEST_USERLIST':
+                    # 处理用户列表请求
+                    current_users = list(self.clients.values())
+                    user_list_msg = "/USERLIST|" + "|".join(current_users)
+                    self.send_message(client_socket, user_list_msg)
                 else:
                     # 普通群聊消息
                     self.append_message(f"{username}：{msg}")
@@ -257,6 +267,11 @@ class ChatServerGUI:
 
                 # 更新客户端列表
                 self.master.after(0, self.update_client_list)
+
+                # 通知其他客户端更新用户列表
+                current_users = list(self.clients.values())
+                user_list_msg = "/USERLIST|" + "|".join(current_users)
+                self.broadcast(user_list_msg, client_socket)
 
                 self.append_message(f"{username} 下线了")
                 self.broadcast(f"【系统】{username} 离开了聊天室", client_socket)
