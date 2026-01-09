@@ -5,6 +5,9 @@ import threading
 import struct
 import os
 import base64
+import subprocess
+import platform
+from datetime import datetime
 
 
 class ChatClientGUI:
@@ -19,8 +22,17 @@ class ChatClientGUI:
         self.current_chat = "聊天室"  # 当前聊天对象，默认为公共聊天室
         self.username = ""  # 初始化用户名
 
-        # 存储不同聊天对象的消息
+        # 存储不同聊天对象的消息（消息格式：字符串或字典{"type": "file", "text": "...", "file_path": "..."}）
         self.chat_history = {"聊天室": []}
+        
+        # 创建文件存储目录
+        self.files_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "received_files")
+        if not os.path.exists(self.files_dir):
+            os.makedirs(self.files_dir)
+        
+        # 文件路径映射（tag_id -> file_path）
+        self.file_path_map = {}
+        self.file_tag_counter = 0
 
         # 创建界面组件
         self.create_widgets()
@@ -77,6 +89,13 @@ class ChatClientGUI:
         )
         self.messages_display.pack(
             fill=tk.BOTH, expand=True, pady=(0, 10))
+        
+        # 配置文件链接的tag样式
+        self.messages_display.tag_config("file_link", foreground="blue", underline=True)
+        # 绑定点击事件和鼠标悬停事件
+        self.messages_display.tag_bind("file_link", "<Button-1>", self.on_file_link_click)
+        self.messages_display.tag_bind("file_link", "<Enter>", self.on_file_link_enter)
+        self.messages_display.tag_bind("file_link", "<Leave>", self.on_file_link_leave)
 
         # 输入区域
         input_frame = tk.Frame(right_frame)
@@ -197,6 +216,7 @@ class ChatClientGUI:
                 # 在本地显示自己的消息
                 self.add_message_to_history(
                     "聊天室", f"{self.username}：{message}")
+                self.add_message_to_history("聊天室", f"{self.username}：{message}")
 
                 self.send_message_raw(message)
                 self.message_entry.delete(0, tk.END)
@@ -254,6 +274,17 @@ class ChatClientGUI:
             self.append_message(
                 f"{self.username}：[文件] {filename} ({file_size_formatted})")
 
+            
+            # 保存发送的文件路径（用于后续点击打开）
+            file_info = {
+                "type": "file",
+                "text": f"{self.username}：[文件] {filename} ({self.format_file_size(file_size)})",
+                "file_path": file_path,
+                "filename": filename,
+                "sender": self.username
+            }
+            self.add_message_to_history("聊天室", file_info)
+            
         except Exception as e:
             messagebox.showerror("发送文件错误", f"发送文件失败: {str(e)}")
 
@@ -287,6 +318,7 @@ class ChatClientGUI:
                 else:
                     # 解析消息类型并处理
                     self.process_received_message(message)
+                # 注意：process_received_message 已经处理了消息添加到历史记录
 
             except Exception as e:
                 if self.connected:
@@ -313,12 +345,12 @@ class ChatClientGUI:
 
             # 解析文件消息：/FILE|filename|filesize|base64data
             if not file_content.startswith("/FILE|"):
-                self.append_message("系统: 文件消息格式错误")
+                self.add_message_to_history("聊天室", "系统: 文件消息格式错误")
                 return
 
             parts = file_content.split("|", 3)
             if len(parts) != 4:
-                self.append_message("系统: 文件消息格式错误")
+                self.add_message_to_history("聊天室", "系统: 文件消息格式错误")
                 return
 
             command, filename, file_size_str, file_data_base64 = parts
@@ -327,20 +359,21 @@ class ChatClientGUI:
             try:
                 file_size = int(file_size_str)
             except ValueError:
-                self.append_message("系统: 文件大小格式错误")
+                self.add_message_to_history("聊天室", "系统: 文件大小格式错误")
                 return
 
             # 解码base64数据
             try:
                 file_data = base64.b64decode(file_data_base64)
             except Exception as e:
-                self.append_message(f"系统: 文件数据解码失败: {str(e)}")
+                self.add_message_to_history("聊天室", f"系统: 文件数据解码失败: {str(e)}")
                 return
 
             # 验证文件大小
             if len(file_data) != file_size:
                 self.append_message(
                     f"系统: 文件大小不匹配 (期望: {file_size}, 实际: {len(file_data)})")
+                self.add_message_to_history("聊天室", f"系统: 文件大小不匹配 (期望: {file_size}, 实际: {len(file_data)})")
                 return
 
             # 检查是否是自己的文件（服务器会广播给所有客户端，包括发送者）
@@ -382,9 +415,54 @@ class ChatClientGUI:
             messagebox.showinfo(
                 "文件接收成功", f"文件 {filename} ({file_size_formatted}) 已保存到:\n{save_path}")
 
+            is_own_file = sender_name and sender_name == getattr(self, 'username', None)
+            
+            # 自动保存文件到固定目录
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # 处理文件名，避免冲突
+            name, ext = os.path.splitext(filename)
+            safe_filename = f"{timestamp}_{name}{ext}"
+            save_path = os.path.join(self.files_dir, safe_filename)
+            
+            # 保存文件
+            with open(save_path, 'wb') as f:
+                f.write(file_data)
+            
+            # 显示接收提示
+            sender_info = f"{sender_name} 发送了" if sender_name else "收到"
+            file_size_formatted = self.format_file_size(file_size)
+            
+            # 确定聊天目标（群聊或私聊）
+            chat_target = "聊天室"
+            if sender_name and sender_name != self.username:
+                # 如果是私聊，可能需要检查消息来源
+                # 这里暂时都放到聊天室，可以根据实际需求调整
+                pass
+            
+            if is_own_file:
+                # 如果是自己的文件，显示提示并保存文件信息
+                file_info = {
+                    "type": "file",
+                    "text": f"{self.username}：[文件] {filename} ({file_size_formatted})",
+                    "file_path": save_path,
+                    "filename": filename,
+                    "sender": self.username
+                }
+                self.add_message_to_history(chat_target, file_info)
+            else:
+                # 其他用户发送的文件
+                file_info = {
+                    "type": "file",
+                    "text": f"{sender_info}文件 {filename} ({file_size_formatted})",
+                    "file_path": save_path,
+                    "filename": filename,
+                    "sender": sender_name or "未知"
+                }
+                self.add_message_to_history(chat_target, file_info)
+            
         except Exception as e:
             error_msg = f"接收文件时出错: {str(e)}"
-            self.append_message(f"系统: {error_msg}")
+            self.add_message_to_history("聊天室", f"系统: {error_msg}")
             messagebox.showerror("接收文件错误", error_msg)
 
     def process_received_message(self, message):
@@ -455,19 +533,63 @@ class ChatClientGUI:
 
     def refresh_message_display(self):
         """刷新消息显示区域"""
-        # 清空当前显示
+        # 清空当前显示和文件路径映射
         self.messages_display.config(state=tk.NORMAL)
         self.messages_display.delete(1.0, tk.END)
+        # 清空文件路径映射（刷新时重建）
+        self.file_path_map.clear()
+        self.file_tag_counter = 0
 
         # 获取当前聊天对象的历史消息
         if self.current_chat in self.chat_history:
             for msg in self.chat_history[self.current_chat]:
-                self.messages_display.insert(tk.END, msg + "\n")
+                self.insert_message_to_display(msg)
 
         # 滚动到底部
         self.messages_display.see(tk.END)
         self.messages_display.config(state=tk.DISABLED)
 
+    def insert_message_to_display(self, msg):
+        """将消息插入到显示区域（支持文件链接）"""
+        if isinstance(msg, dict) and msg.get("type") == "file":
+            # 文件消息，显示为可点击的链接
+            text = msg["text"]
+            file_path = msg.get("file_path", "")
+            # 提取文件名部分，使其可点击
+            # 格式可能是："username：[文件] filename (size)" 或 "系统: 收到文件 filename (size)"
+            # 找到文件名位置
+            if "[文件]" in text:
+                parts = text.split("[文件]")
+                prefix = parts[0] + "[文件] "
+                filename_part = parts[1].split(" (")[0]  # 提取文件名（去掉大小部分）
+                size_part = " (" + " (".join(parts[1].split(" (")[1:])  # 提取大小部分
+                
+                # 插入前缀
+                self.messages_display.insert(tk.END, prefix)
+                # 插入可点击的文件名
+                start_pos = self.messages_display.index(tk.END + "-1c")
+                self.messages_display.insert(tk.END, filename_part)
+                end_pos = self.messages_display.index(tk.END + "-1c")
+                # 生成唯一的tag ID
+                tag_id = f"file_tag_{self.file_tag_counter}"
+                self.file_tag_counter += 1
+                # 存储文件路径映射
+                self.file_path_map[tag_id] = file_path
+                # 应用tag
+                self.messages_display.tag_add("file_link", start_pos, end_pos)
+                self.messages_display.tag_add(tag_id, start_pos, end_pos)
+                # 插入大小部分
+                self.messages_display.insert(tk.END, size_part)
+            else:
+                # 如果格式不匹配，直接显示文本
+                self.messages_display.insert(tk.END, text)
+        else:
+            # 普通文本消息
+            text = msg if isinstance(msg, str) else str(msg)
+            self.messages_display.insert(tk.END, text)
+        
+        self.messages_display.insert(tk.END, "\n")
+    
     def add_message_to_history(self, chat_target, message):
         """添加消息到历史记录"""
         if chat_target not in self.chat_history:
@@ -477,9 +599,47 @@ class ChatClientGUI:
         # 如果当前正在查看这个聊天对象，则更新显示
         if self.current_chat == chat_target:
             self.messages_display.config(state=tk.NORMAL)
-            self.messages_display.insert(tk.END, message + "\n")
+            self.insert_message_to_display(message)
             self.messages_display.see(tk.END)
             self.messages_display.config(state=tk.DISABLED)
+    
+    def on_file_link_enter(self, event):
+        """鼠标进入文件链接区域"""
+        self.messages_display.config(cursor="hand2")
+    
+    def on_file_link_leave(self, event):
+        """鼠标离开文件链接区域"""
+        self.messages_display.config(cursor="")
+    
+    def on_file_link_click(self, event):
+        """处理文件链接点击事件"""
+        # 获取点击位置的索引
+        index = self.messages_display.index(f"@{event.x},{event.y}")
+        
+        # 查找该位置的所有tag
+        tags = self.messages_display.tag_names(index)
+        
+        # 查找文件路径tag
+        file_path = None
+        for tag in tags:
+            if tag.startswith("file_tag_"):
+                file_path = self.file_path_map.get(tag)
+                break
+        
+        if file_path and os.path.exists(file_path):
+            # 使用系统默认程序打开文件
+            try:
+                if platform.system() == 'Windows':
+                    os.startfile(file_path)
+                elif platform.system() == 'Darwin':  # macOS
+                    subprocess.run(['open', file_path])
+                else:  # Linux
+                    subprocess.run(['xdg-open', file_path])
+            except Exception as e:
+                messagebox.showerror("打开文件错误", f"无法打开文件: {str(e)}")
+        else:
+            if file_path:
+                messagebox.showwarning("文件不存在", f"文件不存在或已被删除:\n{file_path}")
 
     def update_users_list(self, users_list):
         """更新用户列表"""
