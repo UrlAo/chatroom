@@ -30,6 +30,20 @@ def send_message(sock, message):
     sock.sendall(length + data)
 
 
+def send_to_user(target_username, message):
+    """发送消息给指定用户"""
+    for client_socket, username in clients.items():
+        if username == target_username:
+            try:
+                data = message.encode()
+                length = struct.pack('!I', len(data))
+                client_socket.send(length + data)
+                return True
+            except:
+                return False
+    return False
+
+
 def broadcast(message, exclude_socket=None):
     for client in clients:
         if client != exclude_socket:
@@ -61,7 +75,6 @@ def handle_client(client_socket, client_address):
 
             print(f"{username}：{msg}")
             broadcast(f"{username}：{msg}", client_socket)
-
 
     except:
         pass

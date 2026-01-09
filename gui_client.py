@@ -9,11 +9,16 @@ class ChatClientGUI:
     def __init__(self, master):
         self.master = master
         self.master.title("聊天室客户端")
-        self.master.geometry("600x500")
+        self.master.geometry("800x600")
 
         # 设置连接变量
         self.client_socket = None
         self.connected = False
+        self.current_chat = "聊天室"  # 当前聊天对象，默认为公共聊天室
+        self.username = ""  # 初始化用户名
+
+        # 存储不同聊天对象的消息
+        self.chat_history = {"聊天室": []}
 
         # 创建界面组件
         self.create_widgets()
@@ -31,25 +36,48 @@ class ChatClientGUI:
         connection_menu.add_command(
             label="断开连接", command=self.disconnect_from_server)
 
-        # 主框架
-        main_frame = tk.Frame(self.master)
+        # 主框架（左右分栏）
+        main_frame = tk.PanedWindow(self.master, orient=tk.HORIZONTAL)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # 消息显示区域
-        self.messages_label = tk.Label(main_frame, text="聊天消息:")
-        self.messages_label.pack(anchor="w")
+        # 左侧框架（用户列表）
+        left_frame = tk.Frame(main_frame)
+        main_frame.add(left_frame, width=200)
 
-        self.messages_display = scrolledtext.ScrolledText(   # 消息显示区域
-            main_frame,
+        # 用户列表标签
+        users_label = tk.Label(left_frame, text="在线用户:")
+        users_label.pack(anchor="w")
+
+        # 用户列表框
+        self.users_listbox = tk.Listbox(left_frame)
+        self.users_listbox.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        # 添加“聊天室”选项
+        self.users_listbox.insert(tk.END, "聊天室")
+
+        # 绑定点击事件
+        self.users_listbox.bind("<<ListboxSelect>>", self.select_chat_target)
+
+        # 右侧框架（聊天区域）
+        right_frame = tk.Frame(main_frame)
+        main_frame.add(right_frame)
+
+        # 当前聊天对象标签
+        self.current_chat_label = tk.Label(right_frame, text="当前聊天: 聊天室")
+        self.current_chat_label.pack(anchor="w")
+
+        # 消息显示区域
+        self.messages_display = scrolledtext.ScrolledText(
+            right_frame,
             wrap=tk.WORD,
             state=tk.DISABLED,
             height=20
         )
         self.messages_display.pack(
-            fill=tk.BOTH, expand=True, pady=(0, 10))  # 消息显示区域
+            fill=tk.BOTH, expand=True, pady=(0, 10))
 
         # 输入区域
-        input_frame = tk.Frame(main_frame)
+        input_frame = tk.Frame(right_frame)
         input_frame.pack(fill=tk.X)
 
         self.message_label = tk.Label(input_frame, text="输入消息:")
@@ -124,7 +152,7 @@ class ChatClientGUI:
 
             self.update_status(
                 f"已连接到 {server_ip}:{server_port} - 用户名: {username}")
-            self.append_message("系统: 已成功连接到聊天室")
+            self.add_message_to_history("聊天室", "系统: 已成功连接到聊天室")
 
         except Exception as e:
             messagebox.showerror("连接错误", f"无法连接到服务器: {str(e)}")
@@ -146,7 +174,7 @@ class ChatClientGUI:
             if self.client_socket:
                 self.client_socket.close()
             self.update_status("已断开连接")
-            self.append_message("系统: 已断开与聊天室的连接")
+            self.add_message_to_history("聊天室", "系统: 已断开与聊天室的连接")
 
     def send_message(self, event=None):  # 发送消息
         if not self.connected:
@@ -184,7 +212,7 @@ class ChatClientGUI:
                 # 接收消息长度
                 raw_len = self.recv_all(4)
                 if not raw_len:
-                    self.append_message("系统: 服务器连接已关闭")
+                    self.add_message_to_history("聊天室", "系统: 服务器连接已关闭")
                     break
 
                 msg_len = struct.unpack('!I', raw_len)[0]
@@ -192,15 +220,43 @@ class ChatClientGUI:
                 # 接收消息内容
                 message = self.recv_all(msg_len).decode()
 
-                # 在主线程中更新UI
-                self.master.after(0, self.append_message, message, False)
+                # 解析消息类型并处理
+                self.process_received_message(message)
 
             except Exception as e:
                 if self.connected:
                     error_msg = f"接收消息时出错: {str(e)} (类型: {type(e).__name__})"
-                    self.append_message(f"系统: {error_msg}")
+                    self.add_message_to_history("聊天室", f"系统: {error_msg}")
                     self.master.after(0, self.handle_connection_error, str(e))
                 break
+
+    def process_received_message(self, message):
+        """处理接收到的消息"""
+        # 检查是否是系统消息（如用户上下线通知）
+        if message.startswith("【系统】"):
+            # 系统消息添加到聊天室
+            self.add_message_to_history("聊天室", message)
+        elif message.startswith("[私聊"):
+            # 私聊消息
+            # 提取发送者用户名
+            sender_start = message.find("[私聊来自") + 5  # "[私聊来自"的长度
+            if sender_start > 4:  # 确保找到了标记
+                sender_end = message.find("]", sender_start)
+                if sender_end > sender_start:
+                    sender = message[sender_start:sender_end]
+                    # 添加到该用户的私聊历史
+                    self.add_message_to_history(sender, message)
+        elif message.startswith("【系统广播】"):
+            # 系统广播消息，添加到所有聊天（包括私聊）
+            # 添加到聊天室
+            self.add_message_to_history("聊天室", message)
+            # 添加到所有私聊对话
+            for chat_target in self.chat_history:
+                if chat_target != "聊天室":
+                    self.add_message_to_history(chat_target, message)
+        else:
+            # 普通群聊消息
+            self.add_message_to_history("聊天室", message)
 
     def recv_all(self, size):
         """接收指定长度的数据"""
@@ -223,12 +279,94 @@ class ChatClientGUI:
         """处理连接错误"""
         self.connected = False
         self.update_status("连接已断开")
-        self.append_message(f"系统: 连接错误 - {error_msg}")
+        self.add_message_to_history("聊天室", f"系统: 连接错误 - {error_msg}")
         messagebox.showerror("连接错误", f"与服务器的连接已断开: {error_msg}")
 
     def update_status(self, status_text):
         """更新状态栏"""
         self.status_bar.config(text=status_text)
+
+    def select_chat_target(self, event):
+        """选择聊天对象"""
+        selection = self.users_listbox.curselection()
+        if selection:
+            target = self.users_listbox.get(selection[0])
+            if target != self.current_chat:
+                self.current_chat = target
+                self.current_chat_label.config(text=f"当前聊天: {target}")
+                self.refresh_message_display()
+
+    def refresh_message_display(self):
+        """刷新消息显示区域"""
+        # 清空当前显示
+        self.messages_display.config(state=tk.NORMAL)
+        self.messages_display.delete(1.0, tk.END)
+
+        # 获取当前聊天对象的历史消息
+        if self.current_chat in self.chat_history:
+            for msg in self.chat_history[self.current_chat]:
+                self.messages_display.insert(tk.END, msg + "\n")
+
+        # 滚动到底部
+        self.messages_display.see(tk.END)
+        self.messages_display.config(state=tk.DISABLED)
+
+    def add_message_to_history(self, chat_target, message):
+        """添加消息到历史记录"""
+        if chat_target not in self.chat_history:
+            self.chat_history[chat_target] = []
+        self.chat_history[chat_target].append(message)
+
+        # 如果当前正在查看这个聊天对象，则更新显示
+        if self.current_chat == chat_target:
+            self.messages_display.config(state=tk.NORMAL)
+            self.messages_display.insert(tk.END, message + "\n")
+            self.messages_display.see(tk.END)
+            self.messages_display.config(state=tk.DISABLED)
+
+    def update_users_list(self, users_list):
+        """更新用户列表"""
+        # 清空当前列表（保留“聊天室”选项）
+        self.users_listbox.delete(0, tk.END)
+        self.users_listbox.insert(tk.END, "聊天室")
+
+        # 添加在线用户（排除自己）
+        for user in users_list:
+            if user != self.username:  # 不显示自己
+                self.users_listbox.insert(tk.END, user)
+
+    def send_message(self, event=None):  # 发送消息
+        if not self.connected:
+            messagebox.showwarning("警告", "未连接到服务器！")
+            return
+
+        message = self.message_entry.get().strip()  # 获取输入消息并去除首尾空格
+        if message:
+            try:
+                # 如果当前聊天对象是“聊天室”，则发送群聊消息
+                if self.current_chat == "聊天室":
+                    # 在本地显示自己的消息
+                    self.add_message_to_history(
+                        "聊天室", f"{self.username}：{message}")
+
+                    self.send_message_raw(message)
+                else:
+                    # 发送私聊消息
+                    private_message = f"@{self.current_chat} {message}"
+                    # 在本地显示私聊消息
+                    self.add_message_to_history(
+                        self.current_chat, f"[私聊给{self.current_chat}] {self.username}：{message}")
+
+                    self.send_message_raw(private_message)
+
+                self.message_entry.delete(0, tk.END)
+
+                # 如果是退出命令，断开连接
+                if message.lower() == "offline":
+                    self.disconnect_from_server()
+
+            except Exception as e:
+                messagebox.showerror("发送错误", f"发送消息失败: {str(e)}")
 
     def on_closing(self):
         """窗口关闭事件处理"""
