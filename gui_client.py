@@ -129,7 +129,6 @@ class ChatClientGUI:
             relief=tk.SUNKEN,
             anchor=tk.W
         )
-        self.master.config(cursor="arrow")
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
         # 绑定窗口关闭事件
@@ -216,7 +215,6 @@ class ChatClientGUI:
                 # 在本地显示自己的消息
                 self.add_message_to_history(
                     "聊天室", f"{self.username}：{message}")
-                self.add_message_to_history("聊天室", f"{self.username}：{message}")
 
                 self.send_message_raw(message)
                 self.message_entry.delete(0, tk.END)
@@ -573,7 +571,6 @@ class ChatClientGUI:
                 # 生成唯一的tag ID
                 tag_id = f"file_tag_{self.file_tag_counter}"
                 self.file_tag_counter += 1
-                # 存储文件路径映射
                 self.file_path_map[tag_id] = file_path
                 # 应用tag
                 self.messages_display.tag_add("file_link", start_pos, end_pos)
