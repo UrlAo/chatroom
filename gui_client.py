@@ -14,7 +14,9 @@ class ChatClientGUI:
     def __init__(self, master):
         self.master = master
         self.master.title("聊天室客户端")
-        self.master.geometry("800x600")
+        self.master.geometry("900x700")
+        # 设置微信风格配色
+        self.master.configure(bg="#F5F5F5")
 
         # 设置连接变量
         self.client_socket = None
@@ -34,6 +36,16 @@ class ChatClientGUI:
         # 文件路径映射（tag_id -> file_path）
         self.file_path_map = {}
         self.file_tag_counter = 0
+        
+        # 用户头像映射（用户名 -> 头像信息）
+        self.user_avatars = {}
+        self.avatar_colors = [
+            "#FF6B6B", "#4ECDC4", "#45B7D1", "#FFA07A", "#98D8C8",
+            "#F7DC6F", "#BB8FCE", "#85C1E2", "#F8B739", "#52BE80"
+        ]
+        self.avatar_counter = 0
+        # 头像emoji列表（更美观的选择）
+        self.avatar_emojis = ["👤", "👨", "👩", "🧑", "👨‍💼", "👩‍💼", "👨‍🎓", "👩‍🎓", "👨‍🔬", "👩‍🔬"]
 
         # 创建界面组件
         self.create_widgets()
@@ -52,23 +64,39 @@ class ChatClientGUI:
             label="断开连接", command=self.disconnect_from_server)
 
         # 主框架（左右分栏）
-        main_frame = tk.PanedWindow(self.master, orient=tk.HORIZONTAL)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        main_frame = tk.PanedWindow(self.master, orient=tk.HORIZONTAL, bg="#F5F5F5", sashwidth=2)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
 
         # 左侧框架（用户列表）
-        left_frame = tk.Frame(main_frame)
-        main_frame.add(left_frame, width=200)
+        left_frame = tk.Frame(main_frame, bg="#EDEDED", width=220)
+        main_frame.add(left_frame, width=220, minsize=180)
 
-        # 用户列表标签
-        users_label = tk.Label(left_frame, text="在线用户:")
-        users_label.pack(anchor="w")
+        # 用户列表标题栏
+        title_frame = tk.Frame(left_frame, bg="#393939", height=50)
+        title_frame.pack(fill=tk.X)
+        title_frame.pack_propagate(False)
 
-        # 用户列表框
-        self.users_listbox = tk.Listbox(left_frame)
-        self.users_listbox.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        title_label = tk.Label(title_frame, text="聊天", font=("Microsoft YaHei", 14, "bold"),
+                               fg="white", bg="#393939")
+        title_label.pack(pady=15)
 
-        # 添加“聊天室”选项
-        self.users_listbox.insert(tk.END, "聊天室")
+        # 用户列表框（美化样式）
+        listbox_frame = tk.Frame(left_frame, bg="#EDEDED")
+        listbox_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+
+        self.users_listbox = tk.Listbox(listbox_frame,
+                                        font=("Microsoft YaHei", 11),
+                                        bg="white",
+                                        fg="#333333",
+                                        selectbackground="#C7E0F4",
+                                        selectforeground="#333333",
+                                        borderwidth=0,
+                                        highlightthickness=0,
+                                        activestyle="none")
+        self.users_listbox.pack(fill=tk.BOTH, expand=True)
+
+        # 添加"聊天室"选项
+        self.users_listbox.insert(tk.END, "💬 聊天室")
 
         # 绑定点击事件
         self.users_listbox.bind("<<ListboxSelect>>", self.select_chat_target)
@@ -79,26 +107,119 @@ class ChatClientGUI:
         self.refresh_button.pack(pady=(5, 0))
 
         # 右侧框架（聊天区域）
-        right_frame = tk.Frame(main_frame)
+        right_frame = tk.Frame(main_frame, bg="#F5F5F5")
         main_frame.add(right_frame)
 
-        # 当前聊天对象标签
-        self.current_chat_label = tk.Label(right_frame, text="当前聊天: 聊天室")
-        self.current_chat_label.pack(anchor="w")
+        # 聊天头部（类似微信）
+        header_frame = tk.Frame(right_frame, bg="#393939", height=60)
+        header_frame.pack(fill=tk.X)
+        header_frame.pack_propagate(False)
 
-        # 消息显示区域
+        self.current_chat_label = tk.Label(header_frame,
+                                           text="聊天室",
+                                           font=("Microsoft YaHei", 14, "bold"),
+                                           fg="white",
+                                           bg="#393939")
+        self.current_chat_label.pack(pady=18)
+
+        # 创建聊天内容容器（包含消息显示和输入区域）
+        chat_content_frame = tk.Frame(right_frame, bg="#F5F5F5")
+        chat_content_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 消息显示区域（微信风格背景）
         self.messages_display = scrolledtext.ScrolledText(
-            right_frame,
+            chat_content_frame,
             wrap=tk.WORD,
             state=tk.DISABLED,
-            height=20
+            height=20,
+            bg="#F5F5F5",
+            fg="#333333",
+            font=("Microsoft YaHei", 11),
+            borderwidth=0,
+            highlightthickness=0,
+            padx=15,
+            pady=10,
+            spacing1=5,
+            spacing2=2,
+            spacing3=5
         )
-        self.messages_display.pack(
-            fill=tk.BOTH, expand=True, pady=(0, 10))
+        self.messages_display.pack(fill=tk.BOTH, expand=True)
 
-        # 配置文件链接的tag样式
-        self.messages_display.tag_config(
-            "file_link", foreground="blue", underline=True)
+        # 配置消息样式tag
+        # 发送的消息（右侧，微信绿色背景）
+        self.messages_display.tag_config("message_sent",
+                                         background="#95EC69",
+                                         foreground="#000000",
+                                         lmargin1=180,
+                                         lmargin2=180,
+                                         rmargin=15,
+                                         relief="flat",
+                                         borderwidth=8,
+                                         wrap="word")
+
+        # 接收的消息（左侧，微信白色背景）
+        self.messages_display.tag_config("message_received",
+                                         background="#FFFFFF",
+                                         foreground="#000000",
+                                         lmargin1=50,
+                                         lmargin2=50,
+                                         rmargin=150,
+                                         relief="flat",
+                                         borderwidth=8,
+                                         wrap="word")
+        
+        # 头像样式
+        self.messages_display.tag_config("avatar",
+                                         font=("Segoe UI Emoji", 20),
+                                         foreground="#333333")
+        
+        # 发送消息的头像（右侧）
+        self.messages_display.tag_config("avatar_sent",
+                                         font=("Segoe UI Emoji", 20),
+                                         foreground="#333333",
+                                         lmargin1=150,
+                                         lmargin2=150,
+                                         rmargin=15,
+                                         spacing1=0,
+                                         spacing2=0,
+                                         spacing3=0)
+        
+        # 接收消息的头像（左侧）
+        self.messages_display.tag_config("avatar_received",
+                                         font=("Segoe UI Emoji", 20),
+                                         foreground="#333333",
+                                         lmargin1=15,
+                                         lmargin2=15,
+                                         rmargin=150,
+                                         spacing1=0,
+                                         spacing2=0,
+                                         spacing3=0)
+
+        # 系统消息（居中，灰色）
+        self.messages_display.tag_config("message_system",
+                                        foreground="#999999",
+                                        justify="center",
+                                        font=("Microsoft YaHei", 9),
+                                        lmargin1=50,
+                                        lmargin2=50,
+                                        rmargin=50)
+        
+        # 时间戳样式（居中，小字体）
+        self.messages_display.tag_config("timestamp",
+                                        foreground="#999999",
+                                        justify="center",
+                                        font=("Microsoft YaHei", 9),
+                                        lmargin1=0,
+                                        lmargin2=0,
+                                        rmargin=0,
+                                        spacing1=5,
+                                        spacing2=2,
+                                        spacing3=5)
+
+        # 文件链接样式
+        self.messages_display.tag_config("file_link",
+                                         foreground="#576B95",
+                                         underline=True)
         # 绑定点击事件和鼠标悬停事件
         self.messages_display.tag_bind(
             "file_link", "<Button-1>", self.on_file_link_click)
@@ -107,39 +228,77 @@ class ChatClientGUI:
         self.messages_display.tag_bind(
             "file_link", "<Leave>", self.on_file_link_leave)
 
-        # 输入区域
-        input_frame = tk.Frame(right_frame)
-        input_frame.pack(fill=tk.X)
+        # 输入区域（微信风格）
+        input_frame = tk.Frame(chat_content_frame, bg="#F5F5F5", height=80)
+        input_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        input_frame.pack_propagate(False)
 
-        self.message_label = tk.Label(input_frame, text="输入消息:")
-        self.message_label.pack(anchor="w")
+        # 输入框容器
+        input_container = tk.Frame(input_frame, bg="white", relief="flat")
+        input_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        self.message_entry = tk.Entry(input_frame)
-        self.message_entry.pack(side=tk.LEFT, fill=tk.X,
-                                expand=True, padx=(0, 5))
+        self.message_entry = tk.Entry(input_container,
+                                      font=("Microsoft YaHei", 11),
+                                      bg="white",
+                                      fg="#333333",
+                                      borderwidth=0,
+                                      highlightthickness=1,
+                                      highlightcolor="#07C160",
+                                      highlightbackground="#E0E0E0",
+                                      relief="flat")
+        self.message_entry.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.message_entry.bind("<Return>", self.send_message)
 
         # 按钮框架
-        button_frame = tk.Frame(input_frame)
-        button_frame.pack(side=tk.RIGHT)
-
-        self.send_button = tk.Button(
-            button_frame, text="发送", command=self.send_message)
-        self.send_button.pack(side=tk.LEFT, padx=(0, 5))
+        button_frame = tk.Frame(input_container, bg="white")
+        button_frame.pack(side=tk.RIGHT, padx=5, pady=5)
 
         self.send_file_button = tk.Button(
-            button_frame, text="发送文件", command=self.send_file)
-        self.send_file_button.pack(side=tk.LEFT)
+            button_frame,
+            text="📎",
+            command=self.send_file,
+            font=("Microsoft YaHei", 14),
+            bg="white",
+            fg="#666666",
+            activebackground="#F0F0F0",
+            borderwidth=0,
+            relief="flat",
+            cursor="hand2",
+            width=3,
+            height=1
+        )
+        self.send_file_button.pack(side=tk.LEFT, padx=2)
 
-        # 状态栏
+        self.send_button = tk.Button(
+            button_frame,
+            text="发送",
+            command=self.send_message,
+            font=("Microsoft YaHei", 11),
+            bg="#07C160",
+            fg="white",
+            activebackground="#06AD56",
+            activeforeground="white",
+            borderwidth=0,
+            relief="flat",
+            cursor="hand2",
+            padx=15,
+            pady=5
+        )
+        self.send_button.pack(side=tk.LEFT, padx=2)
+
+        # 状态栏（微信风格）
         self.status_bar = tk.Label(
             self.master,
-            text="未连接",
-            bd=1,
-            relief=tk.SUNKEN,
-            anchor=tk.W
+            text="● 未连接",
+            font=("Microsoft YaHei", 9),
+            bg="#F5F5F5",
+            fg="#999999",
+            bd=0,
+            relief="flat",
+            anchor=tk.W,
+            padx=10,
+            pady=5
         )
-        self.master.config(cursor="arrow")
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
         # 绑定窗口关闭事件
@@ -226,8 +385,6 @@ class ChatClientGUI:
                 # 在本地显示自己的消息
                 self.add_message_to_history(
                     "聊天室", f"{self.username}：{message}")
-                self.add_message_to_history(
-                    "聊天室", f"{self.username}：{message}")
 
                 self.send_message_raw(message)
                 self.message_entry.delete(0, tk.END)
@@ -280,10 +437,6 @@ class ChatClientGUI:
             # 发送文件消息
             self.send_message_raw(file_message)
 
-            # 在本地显示发送的文件信息（不显示完整的base64数据）
-            file_size_formatted = self.format_file_size(file_size)
-            # 文件信息已经通过file_info字典添加到历史记录中，不需要重复添加
-
             # 保存发送的文件路径（用于后续点击打开）
             file_info = {
                 "type": "file",
@@ -292,6 +445,7 @@ class ChatClientGUI:
                 "filename": filename,
                 "sender": self.username
             }
+            # 直接添加到历史记录（会通过insert_message_to_display正确显示带头像的消息）
             self.add_message_to_history("聊天室", file_info)
 
         except Exception as e:
@@ -392,33 +546,23 @@ class ChatClientGUI:
             sender_info = f"{sender_name} 发送了" if sender_name else "收到"
             file_size_formatted = self.format_file_size(file_size)
 
-            if is_own_file:
-                # 如果是自己的文件，只显示提示，不弹出保存对话框
-                self.add_message_to_history(
-                    "聊天室", f"系统: 您发送的文件 {filename} ({file_size_formatted}) 已广播给其他用户")
-                return
-            else:
-                # 自动保存文件到固定目录
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                # 处理文件名，避免冲突
-                name, ext = os.path.splitext(filename)
-                safe_filename = f"{timestamp}_{name}{ext}"
-                save_path = os.path.join(self.files_dir, safe_filename)
+            # 自动保存文件到固定目录
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # 处理文件名，避免冲突
+            name, ext = os.path.splitext(filename)
+            safe_filename = f"{timestamp}_{name}{ext}"
+            save_path = os.path.join(self.files_dir, safe_filename)
 
-                # 保存文件
-                with open(save_path, 'wb') as f:
-                    f.write(file_data)
+            # 保存文件
+            with open(save_path, 'wb') as f:
+                f.write(file_data)
 
-                # 显示接收提示
-                sender_info = f"{sender_name} 发送了" if sender_name else "收到"
-                file_size_formatted = self.format_file_size(file_size)
-
-                # 确定聊天目标（群聊或私聊）
-                chat_target = "聊天室"
-                if sender_name and sender_name != self.username:
-                    # 如果是私聊，可能需要检查消息来源
-                    # 这里暂时都放到聊天室，可以根据实际需求调整
-                    pass
+            # 确定聊天目标（群聊或私聊）
+            chat_target = "聊天室"
+            if sender_name and sender_name != self.username:
+                # 如果是私聊，可能需要检查消息来源
+                # 这里暂时都放到聊天室，可以根据实际需求调整
+                pass
 
             if is_own_file:
                 # 如果是自己的文件，显示提示并保存文件信息
@@ -431,19 +575,15 @@ class ChatClientGUI:
                 }
                 self.add_message_to_history(chat_target, file_info)
             else:
-                # 其他用户发送的文件
+                # 其他用户发送的文件，自动保存并显示
                 file_info = {
                     "type": "file",
-                    "text": f"系统: {sender_info}文件 {filename} ({file_size_formatted})",
+                    "text": f"{sender_name}：[文件] {filename} ({file_size_formatted})",
                     "file_path": save_path,
                     "filename": filename,
                     "sender": sender_name or "未知"
                 }
                 self.add_message_to_history(chat_target, file_info)
-
-                # 弹出提示框告知用户文件已接收
-                messagebox.showinfo(
-                    "文件接收成功", f"文件 {filename} ({file_size_formatted}) 已保存到:\n{save_path}")
 
         except Exception as e:
             error_msg = f"接收文件时出错: {str(e)}"
@@ -512,16 +652,22 @@ class ChatClientGUI:
 
     def update_status(self, status_text):
         """更新状态栏"""
-        self.status_bar.config(text=status_text)
+        if "已连接" in status_text or "连接" in status_text:
+            self.status_bar.config(text=f"● {status_text}", fg="#07C160")
+        else:
+            self.status_bar.config(text=f"● {status_text}", fg="#999999")
 
     def select_chat_target(self, event):
         """选择聊天对象"""
         selection = self.users_listbox.curselection()
         if selection:
             target = self.users_listbox.get(selection[0])
+            # 移除emoji前缀
+            if target.startswith("💬 "):
+                target = target.replace("💬 ", "")
             if target != self.current_chat:
                 self.current_chat = target
-                self.current_chat_label.config(text=f"当前聊天: {target}")
+                self.current_chat_label.config(text=target)
                 self.refresh_message_display()
 
     def request_user_list(self):
@@ -553,46 +699,172 @@ class ChatClientGUI:
         self.messages_display.see(tk.END)
         self.messages_display.config(state=tk.DISABLED)
 
+    def get_user_avatar(self, username):
+        """获取用户头像（根据用户名生成）"""
+        if username not in self.user_avatars:
+            # 根据用户名生成头像（使用emoji，基于用户名hash）
+            if username:
+                # 使用用户名的hash值来选择emoji
+                hash_val = hash(username) % len(self.avatar_emojis)
+                avatar = self.avatar_emojis[abs(hash_val)]
+                self.user_avatars[username] = avatar
+            else:
+                self.user_avatars[username] = "👤"
+        return self.user_avatars[username]
+    
     def insert_message_to_display(self, msg):
-        """将消息插入到显示区域（支持文件链接）"""
+        """将消息插入到显示区域（支持文件链接和微信风格气泡）"""
+        # 获取当前时间
+        current_time = datetime.now().strftime("%H:%M")
+
         if isinstance(msg, dict) and msg.get("type") == "file":
-            # 文件消息，显示为可点击的链接
+            # 文件消息
             text = msg["text"]
             file_path = msg.get("file_path", "")
-            # 提取文件名部分，使其可点击
-            # 格式可能是："username：[文件] filename (size)" 或 "系统: 收到文件 filename (size)"
-            # 找到文件名位置
+            sender = msg.get("sender", "")
+            is_own = (sender == self.username)
+
+            # 提取文件名部分
             if "[文件]" in text:
                 parts = text.split("[文件]")
-                prefix = parts[0] + "[文件] "
-                filename_part = parts[1].split(" (")[0]  # 提取文件名（去掉大小部分）
-                size_part = " (" + \
-                    " (".join(parts[1].split(" (")[1:])  # 提取大小部分
+                prefix = parts[0].replace(f"{sender}：", "").replace(f"{sender} 发送了", "").strip()
+                filename_part = parts[1].split(" (")[0]
+                size_part = " (" + " (".join(parts[1].split(" (")[1:])
 
-                # 插入前缀
-                self.messages_display.insert(tk.END, prefix)
-                # 插入可点击的文件名
-                start_pos = self.messages_display.index(tk.END + "-1c")
-                self.messages_display.insert(tk.END, filename_part)
-                end_pos = self.messages_display.index(tk.END + "-1c")
-                # 生成唯一的tag ID
-                tag_id = f"file_tag_{self.file_tag_counter}"
-                self.file_tag_counter += 1
-                # 存储文件路径映射
-                self.file_path_map[tag_id] = file_path
-                # 应用tag
-                self.messages_display.tag_add("file_link", start_pos, end_pos)
-                self.messages_display.tag_add(tag_id, start_pos, end_pos)
-                # 插入大小部分
-                self.messages_display.insert(tk.END, size_part)
+                # 先插入时间戳（居中）
+                timestamp_start = self.messages_display.index(tk.END)
+                self.messages_display.insert(tk.END, f"{current_time}\n", "timestamp")
+                timestamp_end = self.messages_display.index(tk.END + "-1c")
+                self.messages_display.tag_add("timestamp", timestamp_start, timestamp_end)
+
+                # 插入头像和消息（在同一行）
+                avatar = self.get_user_avatar(sender)
+                avatar_tag = "avatar_sent" if is_own else "avatar_received"
+                message_text = f"📎 {filename_part}{size_part}"
+                
+                if is_own:
+                    # 发送消息：先头像后消息（右侧对齐）
+                    avatar_start = self.messages_display.index(tk.END)
+                    self.messages_display.insert(tk.END, f"{avatar} ", avatar_tag)
+                    avatar_end = self.messages_display.index(tk.END + "-1c")
+                    self.messages_display.tag_add(avatar_tag, avatar_start, avatar_end)
+                    # 插入消息内容
+                    msg_start = self.messages_display.index(tk.END)
+                    self.messages_display.insert(tk.END, message_text)
+                    msg_end = self.messages_display.index(tk.END + "-1c")
+                    # 应用气泡样式
+                    self.messages_display.tag_add("message_sent", msg_start, msg_end)
+                    # 添加文件链接（找到文件名部分，跳过📎 emoji和空格）
+                    # message_text格式: "📎 {filename_part}{size_part}"
+                    # 计算文件名在文本中的位置
+                    emoji_len = 2  # 📎 emoji通常占2个字符位置
+                    space_len = 1  # 空格
+                    filename_start_in_text = emoji_len + space_len
+                    filename_end_in_text = message_text.find(" (")
+                    if filename_end_in_text < 0:
+                        filename_end_in_text = len(message_text)
+                    
+                    # 计算在Text widget中的实际位置
+                    file_start = self.messages_display.index(f"{msg_start}+{filename_start_in_text}c")
+                    filename_length = filename_end_in_text - filename_start_in_text
+                    file_end = self.messages_display.index(f"{file_start}+{filename_length}c")
+                    
+                    tag_id = f"file_tag_{self.file_tag_counter}"
+                    self.file_tag_counter += 1
+                    self.file_path_map[tag_id] = file_path
+                    self.messages_display.tag_add("file_link", file_start, file_end)
+                    self.messages_display.tag_add(tag_id, file_start, file_end)
+                else:
+                    # 接收消息：先头像后消息（左侧对齐）
+                    avatar_start = self.messages_display.index(tk.END)
+                    self.messages_display.insert(tk.END, f"{avatar} ", avatar_tag)
+                    avatar_end = self.messages_display.index(tk.END + "-1c")
+                    self.messages_display.tag_add(avatar_tag, avatar_start, avatar_end)
+                    # 插入消息内容
+                    msg_start = self.messages_display.index(tk.END)
+                    self.messages_display.insert(tk.END, message_text)
+                    msg_end = self.messages_display.index(tk.END + "-1c")
+                    # 应用气泡样式
+                    self.messages_display.tag_add("message_received", msg_start, msg_end)
+                    # 添加文件链接（找到文件名部分，跳过📎 emoji和空格）
+                    # message_text格式: "📎 {filename_part}{size_part}"
+                    # 计算文件名在文本中的位置
+                    emoji_len = 2  # 📎 emoji通常占2个字符位置
+                    space_len = 1  # 空格
+                    filename_start_in_text = emoji_len + space_len
+                    filename_end_in_text = message_text.find(" (")
+                    if filename_end_in_text < 0:
+                        filename_end_in_text = len(message_text)
+                    
+                    # 计算在Text widget中的实际位置
+                    file_start = self.messages_display.index(f"{msg_start}+{filename_start_in_text}c")
+                    filename_length = filename_end_in_text - filename_start_in_text
+                    file_end = self.messages_display.index(f"{file_start}+{filename_length}c")
+                    
+                    tag_id = f"file_tag_{self.file_tag_counter}"
+                    self.file_tag_counter += 1
+                    self.file_path_map[tag_id] = file_path
+                    self.messages_display.tag_add("file_link", file_start, file_end)
+                    self.messages_display.tag_add(tag_id, file_start, file_end)
+
             else:
-                # 如果格式不匹配，直接显示文本
-                self.messages_display.insert(tk.END, text)
+                self.messages_display.insert(tk.END, text + "\n")
         else:
             # 普通文本消息
             text = msg if isinstance(msg, str) else str(msg)
-            self.messages_display.insert(tk.END, text)
 
+            # 判断消息类型
+            if text.startswith("系统:") or text.startswith("【系统】") or text.startswith("【系统广播】"):
+                # 系统消息（不需要时间戳和头像）
+                self.messages_display.insert(tk.END, f"{text}\n", "message_system")
+            elif "：" in text:
+                # 解析发送者和消息内容
+                parts = text.split("：", 1)
+                if len(parts) == 2:
+                    sender = parts[0].strip()
+                    content = parts[1].strip()
+                    is_own = (sender == self.username)
+
+                    # 先插入时间戳（居中）
+                    timestamp_start = self.messages_display.index(tk.END)
+                    self.messages_display.insert(tk.END, f"{current_time}\n", "timestamp")
+                    timestamp_end = self.messages_display.index(tk.END + "-1c")
+                    self.messages_display.tag_add("timestamp", timestamp_start, timestamp_end)
+
+                    # 插入头像和消息（在同一行）
+                    avatar = self.get_user_avatar(sender)
+                    avatar_tag = "avatar_sent" if is_own else "avatar_received"
+                    
+                    if is_own:
+                        # 发送消息：先头像后消息（右侧对齐）
+                        avatar_start = self.messages_display.index(tk.END)
+                        self.messages_display.insert(tk.END, f"{avatar} ", avatar_tag)
+                        avatar_end = self.messages_display.index(tk.END + "-1c")
+                        self.messages_display.tag_add(avatar_tag, avatar_start, avatar_end)
+                        # 插入消息内容
+                        msg_start = self.messages_display.index(tk.END)
+                        self.messages_display.insert(tk.END, content)
+                        msg_end = self.messages_display.index(tk.END + "-1c")
+                        # 应用气泡样式
+                        self.messages_display.tag_add("message_sent", msg_start, msg_end)
+                    else:
+                        # 接收消息：先头像后消息（左侧对齐）
+                        avatar_start = self.messages_display.index(tk.END)
+                        self.messages_display.insert(tk.END, f"{avatar} ", avatar_tag)
+                        avatar_end = self.messages_display.index(tk.END + "-1c")
+                        self.messages_display.tag_add(avatar_tag, avatar_start, avatar_end)
+                        # 插入消息内容
+                        msg_start = self.messages_display.index(tk.END)
+                        self.messages_display.insert(tk.END, content)
+                        msg_end = self.messages_display.index(tk.END + "-1c")
+                        # 应用气泡样式
+                        self.messages_display.tag_add("message_received", msg_start, msg_end)
+                else:
+                    self.messages_display.insert(tk.END, f"{text}\n")
+            else:
+                self.messages_display.insert(tk.END, f"{text}\n")
+
+        # 消息之间添加空行
         self.messages_display.insert(tk.END, "\n")
 
     def add_message_to_history(self, chat_target, message):
@@ -648,14 +920,14 @@ class ChatClientGUI:
 
     def update_users_list(self, users_list):
         """更新用户列表"""
-        # 清空当前列表（保留“聊天室”选项）
+        # 清空当前列表（保留"聊天室"选项）
         self.users_listbox.delete(0, tk.END)
-        self.users_listbox.insert(tk.END, "聊天室")
+        self.users_listbox.insert(tk.END, "💬 聊天室")
 
         # 添加在线用户（排除自己）
         for user in users_list:
             if user != self.username:  # 不显示自己
-                self.users_listbox.insert(tk.END, user)
+                self.users_listbox.insert(tk.END, f"👤 {user}")
 
     def send_message(self, event=None):  # 发送消息
         if not self.connected:
