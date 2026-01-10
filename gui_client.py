@@ -64,19 +64,32 @@ class ChatClientGUI:
         connection_menu.add_command(
             label="断开连接", command=self.disconnect_from_server)
 
+        # 配置主窗口的行和列权重，使其可缩放
+        self.master.grid_rowconfigure(0, weight=1)
+        self.master.grid_rowconfigure(1, weight=0)  # 状态栏行不扩展
+        self.master.grid_columnconfigure(0, weight=1)
+
         # 主框架（左右分栏）
         main_frame = tk.PanedWindow(
             self.master, orient=tk.HORIZONTAL, bg="#F5F5F5", sashwidth=2)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+        main_frame.grid(row=0, column=0, sticky="nsew")
+
+        # 配置主框架权重
+        self.master.grid_rowconfigure(0, weight=1)
+        self.master.grid_columnconfigure(0, weight=1)
 
         # 左侧框架（用户列表）
-        left_frame = tk.Frame(main_frame, bg="#EDEDED", width=220)
-        main_frame.add(left_frame, width=220, minsize=180)
+        left_frame = tk.Frame(main_frame, bg="#EDEDED", width=250)
+        main_frame.add(left_frame, width=250, minsize=180)
+
+        # 配置左侧框架权重
+        left_frame.grid_rowconfigure(1, weight=1)
+        left_frame.grid_columnconfigure(0, weight=1)
 
         # 用户列表标题栏
         title_frame = tk.Frame(left_frame, bg="#393939", height=50)
-        title_frame.pack(fill=tk.X)
-        title_frame.pack_propagate(False)
+        title_frame.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
+        title_frame.grid_propagate(False)
 
         title_label = tk.Label(title_frame, text="聊天", font=("Microsoft YaHei", 14, "bold"),
                                fg="white", bg="#393939")
@@ -84,7 +97,11 @@ class ChatClientGUI:
 
         # 用户列表框（美化样式）
         listbox_frame = tk.Frame(left_frame, bg="#EDEDED")
-        listbox_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+        listbox_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+
+        # 配置列表框框架权重
+        listbox_frame.grid_rowconfigure(0, weight=1)
+        listbox_frame.grid_columnconfigure(0, weight=1)
 
         self.users_listbox = tk.Listbox(listbox_frame,
                                         font=("Microsoft YaHei", 11),
@@ -95,7 +112,7 @@ class ChatClientGUI:
                                         borderwidth=0,
                                         highlightthickness=0,
                                         activestyle="none")
-        self.users_listbox.pack(fill=tk.BOTH, expand=True)
+        self.users_listbox.grid(row=0, column=0, sticky="nsew")
 
         # 添加"聊天室"选项
         self.users_listbox.insert(tk.END, "💬 聊天室")
@@ -106,16 +123,24 @@ class ChatClientGUI:
         # 刷新按钮
         self.refresh_button = tk.Button(
             left_frame, text="刷新用户", command=self.request_user_list)
-        self.refresh_button.pack(pady=(5, 0))
+        self.refresh_button.grid(
+            row=2, column=0, pady=(5, 0), padx=0, sticky="ew")
+
+        # 配置刷新按钮所在行的权重
+        left_frame.grid_rowconfigure(2, weight=0)
 
         # 右侧框架（聊天区域）
         right_frame = tk.Frame(main_frame, bg="#F5F5F5")
         main_frame.add(right_frame)
 
+        # 配置右侧框架权重
+        right_frame.grid_rowconfigure(1, weight=1)
+        right_frame.grid_columnconfigure(0, weight=1)
+
         # 聊天头部（类似微信）
         header_frame = tk.Frame(right_frame, bg="#393939", height=60)
-        header_frame.pack(fill=tk.X)
-        header_frame.pack_propagate(False)
+        header_frame.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
+        header_frame.grid_propagate(False)
 
         self.current_chat_label = tk.Label(header_frame,
                                            text="聊天室",
@@ -127,7 +152,12 @@ class ChatClientGUI:
 
         # 创建聊天内容容器（包含消息显示和输入区域）
         chat_content_frame = tk.Frame(right_frame, bg="#F5F5F5")
-        chat_content_frame.pack(fill=tk.BOTH, expand=True)
+        chat_content_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+
+        # 配置聊天内容框架权重
+        chat_content_frame.grid_rowconfigure(0, weight=1)  # 消息显示区域扩展
+        chat_content_frame.grid_rowconfigure(1, weight=0)  # 输入框不扩展
+        chat_content_frame.grid_columnconfigure(0, weight=1)
 
         # 消息显示区域（微信风格背景）
         self.messages_display = scrolledtext.ScrolledText(
@@ -146,16 +176,94 @@ class ChatClientGUI:
             spacing2=2,
             spacing3=5
         )
-        self.messages_display.pack(fill=tk.BOTH, expand=True)
+        self.messages_display.grid(
+            row=0, column=0, sticky="nsew", padx=0, pady=0)
+
+        # 输入区域（微信风格）
+        input_frame = tk.Frame(chat_content_frame, bg="#F5F5F5")
+        input_frame.grid(row=1, column=0, sticky="ew", padx=0, pady=0)
+
+        # 配置输入框框架权重
+        chat_content_frame.grid_rowconfigure(1, weight=0)  # 输入框不扩展
+
+        # 配置输入框架的行权重
+        input_frame.grid_rowconfigure(0, weight=1)
+        input_frame.grid_columnconfigure(0, weight=1)
+
+        # 输入框容器
+        input_container = tk.Frame(input_frame, bg="white", relief="flat")
+        input_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+        # 配置输入容器权重
+        input_container.grid_rowconfigure(0, weight=1)
+        input_container.grid_columnconfigure(0, weight=1)
+
+        self.message_entry = tk.Entry(input_container,
+                                      font=("Microsoft YaHei", 11),
+                                      bg="white",
+                                      fg="#333333",
+                                      borderwidth=0,
+                                      highlightthickness=1,
+                                      highlightcolor="#07C160",
+                                      highlightbackground="#E0E0E0",
+                                      relief="flat")
+        self.message_entry.grid(
+            row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+        # 配置输入框权重
+        input_container.grid_columnconfigure(0, weight=1)
+
+        self.message_entry.bind("<Return>", self.send_message)
+
+        # 按钮框架
+        button_frame = tk.Frame(input_container, bg="white")
+        button_frame.grid(row=0, column=1, sticky="ns", padx=5, pady=5)
+
+        self.send_file_button = tk.Button(
+            button_frame,
+            text="📎",
+            command=self.send_file,
+            font=("Microsoft YaHei", 14),
+            bg="white",
+            fg="#666666",
+            activebackground="#F0F0F0",
+            activeforeground="white",
+            borderwidth=0,
+            relief="flat",
+            cursor="hand2",
+            width=3,
+            height=1
+        )
+        self.send_file_button.pack(side=tk.LEFT, padx=2)
+
+        self.send_button = tk.Button(
+            button_frame,
+            text="发送",
+            command=self.send_message,
+            font=("Microsoft YaHei", 11),
+            bg="#07C160",
+            fg="white",
+            activebackground="#06AD56",
+            activeforeground="white",
+            borderwidth=0,
+            relief="flat",
+            cursor="hand2",
+            padx=15,
+            pady=5
+        )
+        self.send_button.pack(side=tk.LEFT, padx=2)
 
         # 配置消息样式tag
         # 发送的消息（右侧，微信绿色背景）
         self.messages_display.tag_config("message_sent",
                                          background="#95EC69",
                                          foreground="#000000",
-                                         lmargin1=180,
-                                         lmargin2=180,
-                                         rmargin=15,
+                                         lmargin1=200,  # 左边距，控制消息整体位置
+                                         lmargin2=200,  # 左边距，控制消息整体位置
+                                         rmargin=20,   # 右边距
+                                         spacing1=0,
+                                         spacing2=0,
+                                         spacing3=0,
                                          relief="flat",
                                          borderwidth=8,
                                          wrap="word")
@@ -164,36 +272,39 @@ class ChatClientGUI:
         self.messages_display.tag_config("message_received",
                                          background="#FFFFFF",
                                          foreground="#000000",
-                                         lmargin1=50,
-                                         lmargin2=50,
-                                         rmargin=150,
+                                         lmargin1=20,   # 左边距
+                                         lmargin2=20,   # 左边距
+                                         rmargin=200,  # 右边距，控制消息整体位置
+                                         spacing1=0,
+                                         spacing2=0,
+                                         spacing3=0,
                                          relief="flat",
                                          borderwidth=8,
                                          wrap="word")
 
-        # 头像样式
-        self.messages_display.tag_config("avatar",
-                                         font=("Segoe UI Emoji", 20),
-                                         foreground="#333333")
+        # 用户名样式
+        self.messages_display.tag_config("username",
+                                         font=("Microsoft YaHei", 10, "bold"),
+                                         foreground="#000000")
 
-        # 发送消息的头像（右侧）
-        self.messages_display.tag_config("avatar_sent",
-                                         font=("Segoe UI Emoji", 20),
-                                         foreground="#333333",
-                                         lmargin1=150,
-                                         lmargin2=150,
-                                         rmargin=15,
+        # 发送消息的用户名（右侧）
+        self.messages_display.tag_config("username_sent",
+                                         font=("Microsoft YaHei", 10, "bold"),
+                                         foreground="#000000",
+                                         lmargin1=200,  # 左边距，控制用户名整体位置
+                                         lmargin2=200,  # 左边距，控制用户名整体位置
+                                         rmargin=20,   # 右边距
                                          spacing1=0,
                                          spacing2=0,
                                          spacing3=0)
 
-        # 接收消息的头像（左侧）
-        self.messages_display.tag_config("avatar_received",
-                                         font=("Segoe UI Emoji", 20),
-                                         foreground="#333333",
-                                         lmargin1=15,
-                                         lmargin2=15,
-                                         rmargin=150,
+        # 接收消息的用户名（左侧）
+        self.messages_display.tag_config("username_received",
+                                         font=("Microsoft YaHei", 10, "bold"),
+                                         foreground="#000000",
+                                         lmargin1=20,   # 左边距
+                                         lmargin2=20,   # 左边距
+                                         rmargin=200,  # 右边距，控制用户名整体位置
                                          spacing1=0,
                                          spacing2=0,
                                          spacing3=0)
@@ -231,65 +342,6 @@ class ChatClientGUI:
         self.messages_display.tag_bind(
             "file_link", "<Leave>", self.on_file_link_leave)
 
-        # 输入区域（微信风格）
-        input_frame = tk.Frame(chat_content_frame, bg="#F5F5F5", height=80)
-        input_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        input_frame.pack_propagate(False)
-
-        # 输入框容器
-        input_container = tk.Frame(input_frame, bg="white", relief="flat")
-        input_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        self.message_entry = tk.Entry(input_container,
-                                      font=("Microsoft YaHei", 11),
-                                      bg="white",
-                                      fg="#333333",
-                                      borderwidth=0,
-                                      highlightthickness=1,
-                                      highlightcolor="#07C160",
-                                      highlightbackground="#E0E0E0",
-                                      relief="flat")
-        self.message_entry.pack(
-            side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self.message_entry.bind("<Return>", self.send_message)
-
-        # 按钮框架
-        button_frame = tk.Frame(input_container, bg="white")
-        button_frame.pack(side=tk.RIGHT, padx=5, pady=5)
-
-        self.send_file_button = tk.Button(
-            button_frame,
-            text="📎",
-            command=self.send_file,
-            font=("Microsoft YaHei", 14),
-            bg="white",
-            fg="#666666",
-            activebackground="#F0F0F0",
-            borderwidth=0,
-            relief="flat",
-            cursor="hand2",
-            width=3,
-            height=1
-        )
-        self.send_file_button.pack(side=tk.LEFT, padx=2)
-
-        self.send_button = tk.Button(
-            button_frame,
-            text="发送",
-            command=self.send_message,
-            font=("Microsoft YaHei", 11),
-            bg="#07C160",
-            fg="white",
-            activebackground="#06AD56",
-            activeforeground="white",
-            borderwidth=0,
-            relief="flat",
-            cursor="hand2",
-            padx=15,
-            pady=5
-        )
-        self.send_button.pack(side=tk.LEFT, padx=2)
-
         # 状态栏（微信风格）
         self.status_bar = tk.Label(
             self.master,
@@ -303,10 +355,13 @@ class ChatClientGUI:
             padx=10,
             pady=5
         )
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.status_bar.grid(row=1, column=0, sticky="ew", padx=0, pady=0)
 
         # 绑定窗口关闭事件
         self.master.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # 绑定窗口大小调整事件，确保响应式布局
+        self.master.bind("<Configure>", self.on_window_resize)
 
     def connect_to_server(self):
         if self.connected:
@@ -679,18 +734,9 @@ class ChatClientGUI:
         self.messages_display.see(tk.END)
         self.messages_display.config(state=tk.DISABLED)
 
-    def get_user_avatar(self, username):
-        """获取用户头像（根据用户名生成）"""
-        if username not in self.user_avatars:
-            # 根据用户名生成头像（使用emoji，基于用户名hash）
-            if username:
-                # 使用用户名的hash值来选择emoji
-                hash_val = hash(username) % len(self.avatar_emojis)
-                avatar = self.avatar_emojis[abs(hash_val)]
-                self.user_avatars[username] = avatar
-            else:
-                self.user_avatars[username] = "👤"
-        return self.user_avatars[username]
+    def get_user_display_name(self, username):
+        """获取用户显示名称"""
+        return username
 
     def insert_message_to_display(self, msg):
         """将消息插入到显示区域（支持文件链接和微信风格气泡）"""
@@ -720,19 +766,20 @@ class ChatClientGUI:
                 self.messages_display.tag_add(
                     "timestamp", timestamp_start, timestamp_end)
 
-                # 插入头像和消息（在同一行）
-                avatar = self.get_user_avatar(sender)
-                avatar_tag = "avatar_sent" if is_own else "avatar_received"
+                # 插入用户名和消息（在同一行）
+                username_display = self.get_user_display_name(sender)
+                username_tag = "username_sent" if is_own else "username_received"
                 message_text = f"📎 {filename_part}{size_part}"
 
                 if is_own:
-                    # 发送消息：先头像后消息（右侧对齐）
-                    avatar_start = self.messages_display.index(tk.END)
+                    # 我发送的文件消息（右侧对齐）
+                    # 插入用户名
+                    username_start = self.messages_display.index(tk.END)
                     self.messages_display.insert(
-                        tk.END, f"{avatar} ", avatar_tag)
-                    avatar_end = self.messages_display.index(tk.END + "-1c")
+                        tk.END, f"{username_display}: ", "username_sent")
+                    username_end = self.messages_display.index(tk.END + "-1c")
                     self.messages_display.tag_add(
-                        avatar_tag, avatar_start, avatar_end)
+                        "username_sent", username_start, username_end)
                     # 插入消息内容
                     msg_start = self.messages_display.index(tk.END)
                     self.messages_display.insert(tk.END, message_text)
@@ -764,13 +811,14 @@ class ChatClientGUI:
                         "file_link", file_start, file_end)
                     self.messages_display.tag_add(tag_id, file_start, file_end)
                 else:
-                    # 接收消息：先头像后消息（左侧对齐）
-                    avatar_start = self.messages_display.index(tk.END)
+                    # 其他人发送的文件消息（左侧对齐）
+                    # 插入用户名
+                    username_start = self.messages_display.index(tk.END)
                     self.messages_display.insert(
-                        tk.END, f"{avatar} ", avatar_tag)
-                    avatar_end = self.messages_display.index(tk.END + "-1c")
+                        tk.END, f"{username_display}: ", "username_received")
+                    username_end = self.messages_display.index(tk.END + "-1c")
                     self.messages_display.tag_add(
-                        avatar_tag, avatar_start, avatar_end)
+                        "username_received", username_start, username_end)
                     # 插入消息内容
                     msg_start = self.messages_display.index(tk.END)
                     self.messages_display.insert(tk.END, message_text)
@@ -813,9 +861,11 @@ class ChatClientGUI:
                 # 系统消息（不需要时间戳和头像）
                 self.messages_display.insert(
                     tk.END, f"{text}\n", "message_system")
-            elif "：" in text:
+            elif ":" in text or "：" in text:
+                # 确定使用哪种冒号
+                separator = "：" if "：" in text else ":"
                 # 解析发送者和消息内容
-                parts = text.split("：", 1)
+                parts = text.split(separator, 1)
                 if len(parts) == 2:
                     sender = parts[0].strip()
                     content = parts[1].strip()
@@ -829,19 +879,20 @@ class ChatClientGUI:
                     self.messages_display.tag_add(
                         "timestamp", timestamp_start, timestamp_end)
 
-                    # 插入头像和消息（在同一行）
-                    avatar = self.get_user_avatar(sender)
-                    avatar_tag = "avatar_sent" if is_own else "avatar_received"
+                    # 插入用户名和消息（在同一行）
+                    username_display = self.get_user_display_name(sender)
+                    username_tag = "username_sent" if is_own else "username_received"
 
                     if is_own:
-                        # 发送消息：先头像后消息（右侧对齐）
-                        avatar_start = self.messages_display.index(tk.END)
+                        # 我发送的消息（右侧对齐）
+                        # 插入用户名
+                        username_start = self.messages_display.index(tk.END)
                         self.messages_display.insert(
-                            tk.END, f"{avatar} ", avatar_tag)
-                        avatar_end = self.messages_display.index(
+                            tk.END, f"{username_display}: ", "username_sent")
+                        username_end = self.messages_display.index(
                             tk.END + "-1c")
                         self.messages_display.tag_add(
-                            avatar_tag, avatar_start, avatar_end)
+                            "username_sent", username_start, username_end)
                         # 插入消息内容
                         msg_start = self.messages_display.index(tk.END)
                         self.messages_display.insert(tk.END, content)
@@ -850,14 +901,15 @@ class ChatClientGUI:
                         self.messages_display.tag_add(
                             "message_sent", msg_start, msg_end)
                     else:
-                        # 接收消息：先头像后消息（左侧对齐）
-                        avatar_start = self.messages_display.index(tk.END)
+                        # 其他人发送的消息（左侧对齐）
+                        # 插入用户名
+                        username_start = self.messages_display.index(tk.END)
                         self.messages_display.insert(
-                            tk.END, f"{avatar} ", avatar_tag)
-                        avatar_end = self.messages_display.index(
+                            tk.END, f"{username_display}: ", "username_received")
+                        username_end = self.messages_display.index(
                             tk.END + "-1c")
                         self.messages_display.tag_add(
-                            avatar_tag, avatar_start, avatar_end)
+                            "username_received", username_start, username_end)
                         # 插入消息内容
                         msg_start = self.messages_display.index(tk.END)
                         self.messages_display.insert(tk.END, content)
@@ -973,6 +1025,12 @@ class ChatClientGUI:
         if self.connected:
             self.disconnect_from_server()
         self.master.destroy()
+
+    def on_window_resize(self, event):
+        # 仅处理根窗口的resize事件，避免组件resize事件重复触发
+        if event.widget == self.master:
+            # 更新界面布局
+            self.master.update_idletasks()
 
 
 def main():
