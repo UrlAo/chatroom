@@ -266,7 +266,8 @@ class ChatClientGUI:
                                          spacing3=0,
                                          relief="flat",
                                          borderwidth=8,
-                                         wrap="word")
+                                         wrap="word",
+                                         justify="right")
 
         # 接收的消息（左侧，微信白色背景）
         self.messages_display.tag_config("message_received",
@@ -280,7 +281,8 @@ class ChatClientGUI:
                                          spacing3=0,
                                          relief="flat",
                                          borderwidth=8,
-                                         wrap="word")
+                                         wrap="word",
+                                         justify="left")
 
         # 用户名样式
         self.messages_display.tag_config("username",
@@ -296,7 +298,8 @@ class ChatClientGUI:
                                          rmargin=20,   # 右边距
                                          spacing1=0,
                                          spacing2=0,
-                                         spacing3=0)
+                                         spacing3=0,
+                                         justify="right")
 
         # 接收消息的用户名（左侧）
         self.messages_display.tag_config("username_received",
@@ -307,7 +310,8 @@ class ChatClientGUI:
                                          rmargin=200,  # 右边距，控制用户名整体位置
                                          spacing1=0,
                                          spacing2=0,
-                                         spacing3=0)
+                                         spacing3=0,
+                                         justify="left")
 
         # 系统消息（居中，灰色）
         self.messages_display.tag_config("message_system",
@@ -474,16 +478,8 @@ class ChatClientGUI:
             # 发送文件消息
             self.send_message_raw(file_message)
 
-            # 保存发送的文件路径（用于后续点击打开）
-            file_info = {
-                "type": "file",
-                "text": f"{self.username}：[文件] {filename} ({self.format_file_size(file_size)})",
-                "file_path": file_path,
-                "filename": filename,
-                "sender": self.username
-            }
-            # 直接添加到历史记录（会通过insert_message_to_display正确显示带头像的消息）
-            self.add_message_to_history("聊天室", file_info)
+            # 注意：发送时不要立即添加到历史记录，因为实际的可点击文件会在接收阶段生成
+            # 当服务器将文件广播回来时，handle_file_receive 方法会处理并创建正确的文件链接
 
         except Exception as e:
             messagebox.showerror("发送文件错误", f"发送文件失败: {str(e)}")
@@ -600,10 +596,10 @@ class ChatClientGUI:
                 pass
 
             if is_own_file:
-                # 如果是自己的文件，显示提示并保存文件信息
+                # 如果是自己的文件，也要显示为可点击的文件消息
                 file_info = {
                     "type": "file",
-                    "text": f"系统: 您发送的文件 {filename} ({file_size_formatted}) 已广播给其他用户",
+                    "text": f"{self.username}：[文件] {filename} ({file_size_formatted})",
                     "file_path": save_path,
                     "filename": filename,
                     "sender": self.username
@@ -619,6 +615,10 @@ class ChatClientGUI:
                     "sender": sender_name or "未知"
                 }
                 self.add_message_to_history(chat_target, file_info)
+                
+                # 显示文件接收成功提示
+                if not is_own_file:
+                    print(f"文件已保存至: {save_path}")  # 控制台输出，便于调试
 
         except Exception as e:
             error_msg = f"接收文件时出错: {str(e)}"
@@ -700,6 +700,8 @@ class ChatClientGUI:
             # 移除emoji前缀
             if target.startswith("💬 "):
                 target = target.replace("💬 ", "")
+            elif target.startswith("👤 "):
+                target = target.replace("👤 ", "")
             if target != self.current_chat:
                 self.current_chat = target
                 self.current_chat_label.config(text=target)
@@ -961,20 +963,22 @@ class ChatClientGUI:
                 file_path = self.file_path_map.get(tag)
                 break
 
-        if file_path and os.path.exists(file_path):
-            # 使用系统默认程序打开文件
-            try:
-                if platform.system() == 'Windows':
-                    os.startfile(file_path)
-                elif platform.system() == 'Darwin':  # macOS
-                    subprocess.run(['open', file_path])
-                else:  # Linux
-                    subprocess.run(['xdg-open', file_path])
-            except Exception as e:
-                messagebox.showerror("打开文件错误", f"无法打开文件: {str(e)}")
+        if file_path:
+            if os.path.exists(file_path):
+                # 使用系统默认程序打开文件
+                try:
+                    if platform.system() == 'Windows':
+                        os.startfile(file_path)
+                    elif platform.system() == 'Darwin':  # macOS
+                        subprocess.run(['open', file_path])
+                    else:  # Linux
+                        subprocess.run(['xdg-open', file_path])
+                except Exception as e:
+                    messagebox.showerror("打开文件错误", f"无法打开文件: {str(e)}")
+            else:
+                messagebox.showwarning("文件不存在", f"文件不存在或已被删除:\n{file_path}\n\n可能的原因:\n1. 发送者删除了原文件\n2. 文件传输过程中出现错误\n3. 文件尚未完全下载")
         else:
-            if file_path:
-                messagebox.showwarning("文件不存在", f"文件不存在或已被删除:\n{file_path}")
+            messagebox.showwarning("文件信息缺失", "无法获取文件路径信息，请重新接收文件")
 
     def update_users_list(self, users_list):
         """更新用户列表"""
