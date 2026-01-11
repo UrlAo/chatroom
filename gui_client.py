@@ -55,12 +55,6 @@ class ChatClientGUI:
         self.video_thread = None
         self.audio_thread = None
         
-        # 心跳机制相关属性
-        self.heartbeat_interval = 30  # 30秒发送一次心跳
-        self.heartbeat_timer = None
-        self.last_heartbeat_response = None
-        self.heartbeat_timeout = 60  # 60秒未收到响应则认为掉线
-        
         # 用户头像映射（用户名 -> 头像信息）
         self.user_avatars = {}
         self.avatar_colors = [
@@ -466,14 +460,6 @@ class ChatClientGUI:
                 f"已连接到 {server_ip}:{server_port} - 用户名: {username}")
             self.add_message_to_history("聊天室", "系统: 已成功连接到聊天室")
 
-            # 请求用户列表
-            self.request_user_list()
-            
-            # 启动心跳机制
-            self.start_heartbeat()
-            # 启动心跳超时检查
-            self.check_heartbeat_timeout()
-
         except Exception as e:
             messagebox.showerror("连接错误", f"无法连接到服务器: {str(e)}")
             if self.client_socket:
@@ -491,9 +477,6 @@ class ChatClientGUI:
             pass
         finally:
             self.connected = False
-            # 取消心跳定时器
-            if self.heartbeat_timer:
-                self.master.after_cancel(self.heartbeat_timer)
             if self.client_socket:
                 self.client_socket.close()
             self.update_status("已断开连接")
@@ -697,16 +680,6 @@ class ChatClientGUI:
                 users = [user for user in parts[1:] if user]  # 排除空字符串
                 # 在主线程中更新用户列表
                 self.master.after(0, self.update_users_list, users)
-        # 检查是否是心跳相关消息
-        elif message.startswith("/HEARTBEAT|"):
-            # 心跳消息
-            heartbeat_type = message.split('|')[1]
-            if heartbeat_type == "ping":
-                # 服务器发送ping，客户端回复pong
-                self.send_message_raw("/HEARTBEAT|pong")
-            elif heartbeat_type == "pong":
-                # 服务器回复pong，更新心跳响应时间
-                self.on_heartbeat_response()
         # 检查是否是视频通话相关消息
         elif message.startswith("/VIDEO_CALL_INVITE|"):
             # 视频通话邀请
@@ -1368,37 +1341,6 @@ class ChatClientGUI:
                     self.remote_video_label.configure(image=img)
             except Exception as e:
                 print(f"视频解码错误: {e}")
-    
-    def start_heartbeat(self):
-        """开始心跳机制"""
-        self.last_heartbeat_response = datetime.now()
-        self.send_heartbeat()
-    
-    def send_heartbeat(self):
-        """发送心跳包"""
-        if self.connected:
-            try:
-                heartbeat_msg = "/HEARTBEAT|ping"
-                self.send_message_raw(heartbeat_msg)
-                # 设置定时器，定期发送心跳
-                self.heartbeat_timer = self.master.after(self.heartbeat_interval * 1000, self.send_heartbeat)
-            except Exception as e:
-                print(f"发送心跳失败: {e}")
-    
-    def on_heartbeat_response(self):
-        """收到心跳响应"""
-        self.last_heartbeat_response = datetime.now()
-    
-    def check_heartbeat_timeout(self):
-        """检查心跳超时"""
-        if self.last_heartbeat_response:
-            time_since_last_response = (datetime.now() - self.last_heartbeat_response).total_seconds()
-            if time_since_last_response > self.heartbeat_timeout:
-                # 心跳超时，断开连接
-                self.add_message_to_history("聊天室", "系统: 连接超时，已断开连接")
-                self.disconnect_from_server()
-        # 继续检查心跳超时
-        self.master.after(5000, self.check_heartbeat_timeout)  # 每5秒检查一次
 
 
 def main():
