@@ -8,6 +8,14 @@ import base64
 import subprocess
 import platform
 from datetime import datetime
+import cv2
+import numpy as np
+import json
+try:
+    import pygame
+    pygame.mixer.init()
+except ImportError:
+    pygame = None
 
 
 class ChatClientGUI:
@@ -36,7 +44,23 @@ class ChatClientGUI:
         # 文件路径映射（tag_id -> file_path）
         self.file_path_map = {}
         self.file_tag_counter = 0
-
+        
+        # 视频通话相关属性
+        self.video_call_active = False
+        self.local_video_cap = None
+        self.remote_video_frame = None
+        self.local_video_window = None
+        self.remote_video_window = None
+        self.video_call_with = None
+        self.video_thread = None
+        self.audio_thread = None
+        
+        # 心跳机制相关属性
+        self.heartbeat_interval = 30  # 30秒发送一次心跳
+        self.heartbeat_timer = None
+        self.last_heartbeat_response = None
+        self.heartbeat_timeout = 60  # 60秒未收到响应则认为掉线
+        
         # 用户头像映射（用户名 -> 头像信息）
         self.user_avatars = {}
         self.avatar_colors = [
@@ -63,6 +87,16 @@ class ChatClientGUI:
             label="连接到服务器", command=self.connect_to_server)
         connection_menu.add_command(
             label="断开连接", command=self.disconnect_from_server)
+        
+        # 视频通话菜单
+        video_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="视频通话", menu=video_menu)
+        video_menu.add_command(
+            label="发起视频通话", command=self.initiate_video_call)
+        video_menu.add_command(
+            label="接听视频通话", command=self.answer_video_call)
+        video_menu.add_command(
+            label="挂断视频通话", command=self.end_video_call)
 
         # 配置主窗口的行和列权重，使其可缩放
         self.master.grid_rowconfigure(0, weight=1)
@@ -235,6 +269,23 @@ class ChatClientGUI:
             height=1
         )
         self.send_file_button.pack(side=tk.LEFT, padx=2)
+        
+        self.video_call_button = tk.Button(
+            button_frame,
+            text="🎥",
+            command=self.initiate_video_call,
+            font=("Microsoft YaHei", 14),
+            bg="white",
+            fg="#666666",
+            activebackground="#F0F0F0",
+            activeforeground="white",
+            borderwidth=0,
+            relief="flat",
+            cursor="hand2",
+            width=3,
+            height=1
+        )
+        self.video_call_button.pack(side=tk.LEFT, padx=2)
 
         self.send_button = tk.Button(
             button_frame,
@@ -415,6 +466,14 @@ class ChatClientGUI:
                 f"已连接到 {server_ip}:{server_port} - 用户名: {username}")
             self.add_message_to_history("聊天室", "系统: 已成功连接到聊天室")
 
+            # 请求用户列表
+            self.request_user_list()
+            
+            # 启动心跳机制
+            self.start_heartbeat()
+            # 启动心跳超时检查
+            self.check_heartbeat_timeout()
+
         except Exception as e:
             messagebox.showerror("连接错误", f"无法连接到服务器: {str(e)}")
             if self.client_socket:
@@ -432,6 +491,9 @@ class ChatClientGUI:
             pass
         finally:
             self.connected = False
+            # 取消心跳定时器
+            if self.heartbeat_timer:
+                self.master.after_cancel(self.heartbeat_timer)
             if self.client_socket:
                 self.client_socket.close()
             self.update_status("已断开连接")
@@ -635,6 +697,45 @@ class ChatClientGUI:
                 users = [user for user in parts[1:] if user]  # 排除空字符串
                 # 在主线程中更新用户列表
                 self.master.after(0, self.update_users_list, users)
+        # 检查是否是心跳相关消息
+        elif message.startswith("/HEARTBEAT|"):
+            # 心跳消息
+            heartbeat_type = message.split('|')[1]
+            if heartbeat_type == "ping":
+                # 服务器发送ping，客户端回复pong
+                self.send_message_raw("/HEARTBEAT|pong")
+            elif heartbeat_type == "pong":
+                # 服务器回复pong，更新心跳响应时间
+                self.on_heartbeat_response()
+        # 检查是否是视频通话相关消息
+        elif message.startswith("/VIDEO_CALL_INVITE|"):
+            # 视频通话邀请
+            caller = message.split('|')[1]
+            self.master.after(0, self.receive_video_call_request, caller)
+        elif message.startswith("/VIDEO_CALL_START|"):
+            # 视频通话开始
+            caller = message.split('|')[1]
+            self.master.after(0, self.start_video_call, caller, False)
+        elif message.startswith("/VIDEO_CALL_REJECTED|"):
+            # 视频通话被拒绝
+            caller = message.split('|')[1]
+            self.master.after(0, lambda: messagebox.showinfo("视频通话", f"{caller} 拒绝了您的视频通话请求"))
+        elif message.startswith("/VIDEO_CALL_ENDED|"):
+            # 视频通话结束
+            caller = message.split('|')[1]
+            self.master.after(0, lambda: messagebox.showinfo("视频通话", f"{caller} 结束了视频通话"))
+            if self.video_call_active:
+                self.master.after(0, self.stop_video_call)
+        elif message.startswith("/VIDEO_DATA|"):
+            # 视频数据
+            try:
+                parts = message.split('|', 2)  # 最多分割为3部分
+                sender = parts[1]
+                video_data = parts[2]
+                # 在主线程中处理视频数据
+                self.master.after(0, self.receive_video_data, sender, video_data)
+            except IndexError:
+                print(f"视频数据格式错误: {message}")
         # 检查是否是系统消息（如用户上下线通知）
         elif message.startswith("【系统】"):
             # 系统消息添加到聊天室
@@ -1035,9 +1136,273 @@ class ChatClientGUI:
         if event.widget == self.master:
             # 更新界面布局
             self.master.update_idletasks()
+    
+    def initiate_video_call(self):
+        """发起视频通话"""
+        if not self.connected:
+            messagebox.showwarning("警告", "未连接到服务器！")
+            return
+        
+        # 检查是否已经有视频通话正在进行
+        if self.video_call_active:
+            messagebox.showwarning("警告", f"您正在与 {self.video_call_with} 进行视频通话！")
+            return
+        
+        # 检查是否有摄像头
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            messagebox.showerror("错误", "无法打开摄像头！")
+            return
+        cap.release()
+        
+        # 选择要呼叫的用户
+        if self.current_chat == "聊天室":
+            messagebox.showinfo("提示", "请选择一个用户进行视频通话")
+            return
+        
+        target_user = self.current_chat
+        confirm = messagebox.askyesno("视频通话", f"确定要向 {target_user} 发起视频通话吗？")
+        if confirm:
+            # 发送视频通话请求
+            video_call_request = f"/VIDEO_CALL_REQUEST|{target_user}"
+            self.send_message_raw(video_call_request)
+            self.add_message_to_history("聊天室", f"系统: 已向 {target_user} 发起视频通话请求")
+    
+    def receive_video_call_request(self, caller):
+        """接收视频通话请求"""
+        response = messagebox.askyesno("视频通话请求", f"{caller} 邀请您进行视频通话，是否接受？")
+        if response:
+            # 接受视频通话
+            accept_msg = f"/VIDEO_CALL_ACCEPT|{caller}"
+            self.send_message_raw(accept_msg)
+            self.start_video_call(caller, is_caller=False)
+        else:
+            # 拒绝视频通话
+            reject_msg = f"/VIDEO_CALL_REJECT|{caller}"
+            self.send_message_raw(reject_msg)
+    
+    def answer_video_call(self):
+        """接听视频通话"""
+        if self.video_call_with:
+            self.start_video_call(self.video_call_with, is_caller=False)
+    
+    def end_video_call(self):
+        """结束视频通话"""
+        if self.video_call_active:
+            # 发送结束视频通话消息
+            end_msg = f"/VIDEO_CALL_END|{self.video_call_with}"
+            self.send_message_raw(end_msg)
+            
+            # 停止视频通话
+            self.stop_video_call()
+            self.add_message_to_history("聊天室", f"系统: 视频通话已结束")
+    
+    def start_video_call(self, with_user, is_caller=True):
+        """开始视频通话"""
+        # 检查是否已经有视频通话正在进行
+        if self.video_call_active:
+            if self.video_call_with != with_user:
+                messagebox.showwarning("警告", f"您正在与 {self.video_call_with} 进行视频通话！")
+            return
+        
+        self.video_call_active = True
+        self.video_call_with = with_user
+        
+        # 打开本地摄像头
+        self.local_video_cap = cv2.VideoCapture(0)
+        if not self.local_video_cap.isOpened():
+            messagebox.showerror("错误", "无法打开本地摄像头！")
+            self.video_call_active = False
+            return
+        
+        # 设置摄像头参数以减少资源消耗
+        self.local_video_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+        self.local_video_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+        self.local_video_cap.set(cv2.CAP_PROP_FPS, 15)
+        
+        # 创建视频通话窗口
+        self.create_video_call_window(is_caller)
+        
+        # 启动视频传输线程
+        self.video_thread = threading.Thread(target=self.transmit_video, daemon=True)
+        self.video_thread.start()
+        
+        self.add_message_to_history("聊天室", f"系统: 与 {with_user} 的视频通话已开始")
+    
+    def stop_video_call(self):
+        """停止视频通话"""
+        self.video_call_active = False
+        
+        # 释放摄像头资源
+        if self.local_video_cap:
+            self.local_video_cap.release()
+        
+        # 关闭视频窗口
+        if self.local_video_window:
+            self.local_video_window.destroy()
+        if self.remote_video_window:
+            self.remote_video_window.destroy()
+        
+        # 重置变量
+        self.local_video_cap = None
+        self.local_video_window = None
+        self.remote_video_window = None
+        self.video_call_with = None
+    
+    def create_video_call_window(self, is_caller):
+        """创建视频通话窗口"""
+        # 本地视频窗口
+        self.local_video_window = tk.Toplevel(self.master)
+        self.local_video_window.title("本地视频")
+        self.local_video_window.geometry("300x200")
+        self.local_video_window.protocol("WM_DELETE_WINDOW", self.end_video_call)
+        
+        self.local_video_label = tk.Label(self.local_video_window)
+        self.local_video_label.pack(fill=tk.BOTH, expand=True)
+        
+        # 远程视频窗口
+        self.remote_video_window = tk.Toplevel(self.master)
+        self.remote_video_window.title(f"远程视频 - {self.video_call_with}")
+        self.remote_video_window.geometry("400x300")
+        self.remote_video_window.protocol("WM_DELETE_WINDOW", self.end_video_call)
+        
+        self.remote_video_label = tk.Label(self.remote_video_window)
+        self.remote_video_label.pack(fill=tk.BOTH, expand=True)
+        
+        # 开始更新视频帧
+        self.update_local_video()
+    
+    def update_local_video(self):
+        """更新本地视频画面"""
+        if self.video_call_active and self.local_video_cap:
+            ret, frame = self.local_video_cap.read()
+            if ret:
+                # 调整帧大小以适应显示区域
+                frame = cv2.resize(frame, (300, 200))
+                # 翻转帧（镜像效果）
+                frame = cv2.flip(frame, 1)
+                
+                # 转换颜色空间从BGR到RGB
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                
+                # 将numpy数组转换为图像
+                h, w = frame_rgb.shape[:2]
+                img = tk.PhotoImage(width=w, height=h)
+                
+                # 逐像素设置图像（这是简化实现，实际应用中可能需要更高效的方法）
+                for y in range(min(h, 300)):
+                    for x in range(min(w, 300)):
+                        r, g, b = frame_rgb[y, x]
+                        hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                        img.put(hex_color, (x, y))
+                
+                self.local_video_label.img = img  # 保持引用防止被垃圾回收
+                self.local_video_label.configure(image=img)
+                
+                # 每30毫秒更新一次
+                self.local_video_window.after(30, self.update_local_video)
+    
+    def transmit_video(self):
+        """传输视频数据"""
+        last_send_time = time.time()
+        SEND_INTERVAL = 0.2  # 限制发送间隔为0.2秒（5fps）
+        
+        while self.video_call_active and self.local_video_cap:
+            ret, frame = self.local_video_cap.read()
+            if not ret:
+                time.sleep(0.033)  # 30fps的延迟
+                continue
+                
+            current_time = time.time()
+            # 控制发送频率
+            if current_time - last_send_time < SEND_INTERVAL:
+                time.sleep(0.033)  # 30fps的延迟
+                continue
+                
+            # 编码帧为JPEG
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 40]  # 进一步降低质量以减少带宽
+            result, encoded_image = cv2.imencode('.jpg', frame, encode_param)
+            if result:
+                # 转换为base64编码并发送
+                image_data = base64.b64encode(encoded_image.tobytes()).decode('utf-8')
+                video_data = f"/VIDEO_DATA|{self.video_call_with}|{image_data}"
+                
+                try:
+                    # 发送视频数据
+                    self.send_message_raw(video_data)
+                except Exception as e:
+                    print(f"发送视频数据失败: {e}")
+                    break
+                    
+            last_send_time = current_time
+            time.sleep(0.033)  # 30fps的延迟
+    
+    def receive_video_data(self, sender, image_data):
+        """接收并显示远程视频数据"""
+        if hasattr(self, 'remote_video_label') and self.video_call_active:
+            try:
+                # 解码base64图像数据
+                img_bytes = base64.b64decode(image_data)
+                nparr = np.frombuffer(img_bytes, np.uint8)
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                
+                if frame is not None:
+                    # 调整帧大小以适应显示区域
+                    frame = cv2.resize(frame, (400, 300))
+                    
+                    # 转换颜色空间从BGR到RGB
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    
+                    # 将numpy数组转换为图像
+                    h, w = frame_rgb.shape[:2]
+                    img = tk.PhotoImage(width=w, height=h)
+                    
+                    # 逐像素设置图像
+                    for y in range(min(h, 300)):
+                        for x in range(min(w, 400)):
+                            r, g, b = frame_rgb[y, x]
+                            hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                            img.put(hex_color, (x, y))
+                    
+                    self.remote_video_label.img = img  # 保持引用防止被垃圾回收
+                    self.remote_video_label.configure(image=img)
+            except Exception as e:
+                print(f"视频解码错误: {e}")
+    
+    def start_heartbeat(self):
+        """开始心跳机制"""
+        self.last_heartbeat_response = datetime.now()
+        self.send_heartbeat()
+    
+    def send_heartbeat(self):
+        """发送心跳包"""
+        if self.connected:
+            try:
+                heartbeat_msg = "/HEARTBEAT|ping"
+                self.send_message_raw(heartbeat_msg)
+                # 设置定时器，定期发送心跳
+                self.heartbeat_timer = self.master.after(self.heartbeat_interval * 1000, self.send_heartbeat)
+            except Exception as e:
+                print(f"发送心跳失败: {e}")
+    
+    def on_heartbeat_response(self):
+        """收到心跳响应"""
+        self.last_heartbeat_response = datetime.now()
+    
+    def check_heartbeat_timeout(self):
+        """检查心跳超时"""
+        if self.last_heartbeat_response:
+            time_since_last_response = (datetime.now() - self.last_heartbeat_response).total_seconds()
+            if time_since_last_response > self.heartbeat_timeout:
+                # 心跳超时，断开连接
+                self.add_message_to_history("聊天室", "系统: 连接超时，已断开连接")
+                self.disconnect_from_server()
+        # 继续检查心跳超时
+        self.master.after(5000, self.check_heartbeat_timeout)  # 每5秒检查一次
 
 
 def main():
+
     root = tk.Tk()
     app = ChatClientGUI(root)
     root.mainloop()
