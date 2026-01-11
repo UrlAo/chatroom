@@ -241,45 +241,82 @@ class ChatServerGUI:
                         self.broadcast(f"{username}：{msg}", client_socket)
                 elif msg.startswith('/FILE|'):
                     # 处理文件传输消息
-                    # 格式：/FILE|filename|filesize|base64data
-                    self.append_message(f"{username} 发送了一个文件")
-                    # 广播文件消息给其他客户端（包括发送者）
-                    self.broadcast(f"{username}：{msg}", None)
+                    # 检查是否是私聊文件消息
+                    if msg.startswith('@'):
+                        # 私聊文件消息格式：@target_user /FILE|filename|filesize|base64data
+                        parts = msg.split(' ', 1)
+                        if len(parts) == 2:
+                            target_user = parts[0][1:]  # 移除@符号
+                            file_content = parts[1]
+                            # 检查目标用户是否存在
+                            target_exists = any(
+                                u == target_user for u in self.clients.values())
+                            if target_exists:
+                                # 发送给目标用户私聊文件消息
+                                sender_msg = f"[私聊给{target_user}] {username}：{file_content}"
+                                receiver_msg = f"[私聊来自{username}] {username}：{file_content}"
+
+                                # 发送给发送者确认消息
+                                self.send_to_user(username, sender_msg)
+                                # 发送给接收者文件消息
+                                self.send_to_user(target_user, receiver_msg)
+
+                                self.append_message(
+                                    f"{username} 私聊发送文件给 {target_user}")
+                            else:
+                                # 目标用户不存在，发送错误消息给发送者
+                                error_msg = f"【系统】错误：用户 {target_user} 不在线"
+                                self.send_to_user(username, error_msg)
+                                self.append_message(
+                                    f"{username} 尝试私聊发送文件给 {target_user}（用户不在线）")
+                    else:
+                        # 群聊文件消息
+                        # 格式：/FILE|filename|filesize|base64data
+                        self.append_message(f"{username} 发送了一个文件")
+                        # 广播文件消息给其他客户端（不包括发送者）
+                        self.broadcast(f"{username}：{msg}", client_socket)
                 elif msg.startswith('/VIDEO_CALL_REQUEST|'):
                     # 处理视频通话请求
                     # 格式：/VIDEO_CALL_REQUEST|target_user
                     target_user = msg.split('|')[1]
                     # 检查目标用户是否存在
-                    target_exists = any(u == target_user for u in self.clients.values())
+                    target_exists = any(
+                        u == target_user for u in self.clients.values())
                     if target_exists:
                         # 发送给目标用户视频通话请求
-                        self.send_to_user(target_user, f"/VIDEO_CALL_INVITE|{username}")
-                        self.append_message(f"{username} 请求与 {target_user} 进行视频通话")
+                        self.send_to_user(
+                            target_user, f"/VIDEO_CALL_INVITE|{username}")
+                        self.append_message(
+                            f"{username} 请求与 {target_user} 进行视频通话")
                     else:
                         # 目标用户不存在，发送错误消息给发起者
                         error_msg = f"【系统】错误：用户 {target_user} 不在线"
                         self.send_to_user(username, error_msg)
-                        self.append_message(f"{username} 尝试视频通话 {target_user}（用户不在线）")
+                        self.append_message(
+                            f"{username} 尝试视频通话 {target_user}（用户不在线）")
                 elif msg.startswith('/VIDEO_CALL_ACCEPT|'):
                     # 处理视频通话接受
                     # 格式：/VIDEO_CALL_ACCEPT|target_user
                     target_user = msg.split('|')[1]
                     # 通知发起者对方接受了视频通话
-                    self.send_to_user(target_user, f"/VIDEO_CALL_START|{username}")
+                    self.send_to_user(
+                        target_user, f"/VIDEO_CALL_START|{username}")
                     self.append_message(f"{target_user} 接受了 {username} 的视频通话")
                 elif msg.startswith('/VIDEO_CALL_REJECT|'):
                     # 处理视频通话拒绝
                     # 格式：/VIDEO_CALL_REJECT|target_user
                     target_user = msg.split('|')[1]
                     # 通知发起者对方拒绝了视频通话
-                    self.send_to_user(target_user, f"/VIDEO_CALL_REJECTED|{username}")
+                    self.send_to_user(
+                        target_user, f"/VIDEO_CALL_REJECTED|{username}")
                     self.append_message(f"{target_user} 拒绝了 {username} 的视频通话")
                 elif msg.startswith('/VIDEO_CALL_END|'):
                     # 处理视频通话结束
                     # 格式：/VIDEO_CALL_END|target_user
                     target_user = msg.split('|')[1]
                     # 通知对方视频通话已结束
-                    self.send_to_user(target_user, f"/VIDEO_CALL_ENDED|{username}")
+                    self.send_to_user(
+                        target_user, f"/VIDEO_CALL_ENDED|{username}")
                     self.append_message(f"{username} 与 {target_user} 的视频通话已结束")
                 elif msg.startswith('/VIDEO_DATA|'):
                     # 处理视频数据

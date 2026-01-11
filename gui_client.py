@@ -44,7 +44,7 @@ class ChatClientGUI:
         # 文件路径映射（tag_id -> file_path）
         self.file_path_map = {}
         self.file_tag_counter = 0
-        
+
         # 视频通话相关属性
         self.video_call_active = False
         self.local_video_cap = None
@@ -54,7 +54,7 @@ class ChatClientGUI:
         self.video_call_with = None
         self.video_thread = None
         self.audio_thread = None
-        
+
         # 用户头像映射（用户名 -> 头像信息）
         self.user_avatars = {}
         self.avatar_colors = [
@@ -63,8 +63,6 @@ class ChatClientGUI:
         ]
         self.avatar_counter = 0
         # 头像emoji列表（更美观的选择）
-        self.avatar_emojis = ["👤", "👨", "👩", "🧑",
-                              "👨‍💼", "👩‍💼", "👨‍🎓", "👩‍🎓", "👨‍🔬", "👩‍🔬"]
 
         # 创建界面组件
         self.create_widgets()
@@ -81,7 +79,7 @@ class ChatClientGUI:
             label="连接到服务器", command=self.connect_to_server)
         connection_menu.add_command(
             label="断开连接", command=self.disconnect_from_server)
-        
+
         # 视频通话菜单
         video_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="视频通话", menu=video_menu)
@@ -202,7 +200,8 @@ class ChatClientGUI:
             pady=10,
             spacing1=5,
             spacing2=2,
-            spacing3=5
+            spacing3=5,
+            cursor="arrow"  # 设置默认光标为箭头
         )
         self.messages_display.grid(
             row=0, column=0, sticky="nsew", padx=0, pady=0)
@@ -263,7 +262,7 @@ class ChatClientGUI:
             height=1
         )
         self.send_file_button.pack(side=tk.LEFT, padx=2)
-        
+
         self.video_call_button = tk.Button(
             button_frame,
             text="🎥",
@@ -382,7 +381,8 @@ class ChatClientGUI:
         # 文件链接样式
         self.messages_display.tag_config("file_link",
                                          foreground="#576B95",
-                                         underline=True)
+                                         underline=True,
+                                         font=("Microsoft YaHei", 11))
         # 绑定点击事件和鼠标悬停事件
         self.messages_display.tag_bind(
             "file_link", "<Button-1>", self.on_file_link_click)
@@ -390,6 +390,11 @@ class ChatClientGUI:
             "file_link", "<Enter>", self.on_file_link_enter)
         self.messages_display.tag_bind(
             "file_link", "<Leave>", self.on_file_link_leave)
+
+        # 绑定鼠标移动事件，用于动态管理光标
+        self.messages_display.bind("<Motion>", self.on_mouse_move)
+        self.messages_display.bind(
+            "<Leave>", lambda e: self.messages_display.config(cursor="arrow"))
 
         # 状态栏（微信风格）
         self.status_bar = tk.Label(
@@ -520,11 +525,34 @@ class ChatClientGUI:
             # 构建文件传输消息：/FILE|filename|filesize|base64data
             file_message = f"/FILE|{filename}|{file_size}|{file_data_base64}"
 
-            # 发送文件消息
-            self.send_message_raw(file_message)
+            # 根据当前聊天对象决定发送方式
+            if self.current_chat != "聊天室":
+                # 私聊文件：格式 @target_user /FILE|filename|filesize|base64data
+                private_file_message = f"@{self.current_chat} {file_message}"
+                self.send_message_raw(private_file_message)
 
-            # 注意：发送时不要立即添加到历史记录，因为实际的可点击文件会在接收阶段生成
-            # 当服务器将文件广播回来时，handle_file_receive 方法会处理并创建正确的文件链接
+                # 在私聊对话中添加发送记录
+                file_info = {
+                    "type": "file",
+                    "text": f"[私聊给{self.current_chat}] {self.username}：[文件] {filename} ({self.format_file_size(file_size)})",
+                    "file_path": file_path,  # 使用原始文件路径
+                    "filename": filename,
+                    "sender": self.username
+                }
+                self.add_message_to_history(self.current_chat, file_info)
+            else:
+                # 群聊文件
+                self.send_message_raw(file_message)
+
+                # 在聊天室中添加发送记录
+                file_info = {
+                    "type": "file",
+                    "text": f"{self.username}：[文件] {filename} ({self.format_file_size(file_size)})",
+                    "file_path": file_path,  # 使用原始文件路径
+                    "filename": filename,
+                    "sender": self.username
+                }
+                self.add_message_to_history("聊天室", file_info)
 
         except Exception as e:
             messagebox.showerror("发送文件错误", f"发送文件失败: {str(e)}")
@@ -569,6 +597,9 @@ class ChatClientGUI:
     def handle_file_receive(self, file_message):
         """处理接收到的文件"""
         try:
+            # 由于服务器已修改，不再将文件消息发送回发送者
+            # 因此这里接收到的文件消息一定是别人发送的
+
             # 服务器广播的格式可能是 "username：/FILE|..." 或直接是 "/FILE|..."
             # 提取发送者用户名（如果有）
             sender_name = None
@@ -592,7 +623,8 @@ class ChatClientGUI:
                             if separator_pos == -1:  # 没找到中文冒号，尝试英文冒号
                                 separator_pos = content_after_bracket.find(":")
                             if separator_pos != -1:
-                                file_content = content_after_bracket[separator_pos + 1:].strip()
+                                file_content = content_after_bracket[separator_pos + 1:].strip(
+                                )
                         else:
                             file_content = content_after_bracket
             elif "：" in file_message or ":" in file_message:
@@ -635,11 +667,8 @@ class ChatClientGUI:
                     "聊天室", f"系统: 文件大小不匹配 (期望: {file_size}, 实际: {len(file_data)})")
                 return
 
-            # 检查是否是自己的文件（服务器会广播给所有客户端，包括发送者）
-            is_own_file = sender_name and sender_name == getattr(
-                self, 'username', None)
-
-            # 显示接收提示
+            # 接收到的文件消息一定是别人发送的，因为服务器不会将文件发回给发送者
+            # 所以我们总是接收文件并保存
             sender_info = f"{sender_name} 发送了" if sender_name else "收到"
             file_size_formatted = self.format_file_size(file_size)
 
@@ -663,30 +692,18 @@ class ChatClientGUI:
                 # 如果是群聊中的文件消息
                 pass
 
-            if is_own_file:
-                # 如果是自己的文件，也要显示为可点击的文件消息
-                file_info = {
-                    "type": "file",
-                    "text": f"{self.username}：[文件] {filename} ({file_size_formatted})",
-                    "file_path": save_path,
-                    "filename": filename,
-                    "sender": self.username
-                }
-                self.add_message_to_history(chat_target, file_info)
-            else:
-                # 其他用户发送的文件，自动保存并显示
-                file_info = {
-                    "type": "file",
-                    "text": f"{sender_name}：[文件] {filename} ({file_size_formatted})",
-                    "file_path": save_path,
-                    "filename": filename,
-                    "sender": sender_name or "未知"
-                }
-                self.add_message_to_history(chat_target, file_info)
-                
-                # 显示文件接收成功提示
-                if not is_own_file:
-                    print(f"文件已保存至: {save_path}")  # 控制台输出，便于调试
+            # 接收者：保存文件并显示记录
+            file_info = {
+                "type": "file",
+                "text": f"{sender_name}：[文件] {filename} ({file_size_formatted})",
+                "file_path": save_path,
+                "filename": filename,
+                "sender": sender_name or "未知"
+            }
+            self.add_message_to_history(chat_target, file_info)
+
+            # 显示文件接收成功提示
+            print(f"文件已保存至: {save_path}")  # 控制台输出，便于调试
 
         except Exception as e:
             error_msg = f"接收文件时出错: {str(e)}"
@@ -715,11 +732,13 @@ class ChatClientGUI:
         elif message.startswith("/VIDEO_CALL_REJECTED|"):
             # 视频通话被拒绝
             caller = message.split('|')[1]
-            self.master.after(0, lambda: messagebox.showinfo("视频通话", f"{caller} 拒绝了您的视频通话请求"))
+            self.master.after(0, lambda: messagebox.showinfo(
+                "视频通话", f"{caller} 拒绝了您的视频通话请求"))
         elif message.startswith("/VIDEO_CALL_ENDED|"):
             # 视频通话结束
             caller = message.split('|')[1]
-            self.master.after(0, lambda: messagebox.showinfo("视频通话", f"{caller} 结束了视频通话"))
+            self.master.after(0, lambda: messagebox.showinfo(
+                "视频通话", f"{caller} 结束了视频通话"))
             if self.video_call_active:
                 self.master.after(0, self.stop_video_call)
         elif message.startswith("/VIDEO_DATA|"):
@@ -729,7 +748,8 @@ class ChatClientGUI:
                 sender = parts[1]
                 video_data = parts[2]
                 # 在主线程中处理视频数据
-                self.master.after(0, self.receive_video_data, sender, video_data)
+                self.master.after(0, self.receive_video_data,
+                                  sender, video_data)
             except IndexError:
                 print(f"视频数据格式错误: {message}")
         # 检查是否是系统消息（如用户上下线通知）
@@ -901,7 +921,7 @@ class ChatClientGUI:
                     # 添加文件链接（找到文件名部分，跳过📎 emoji和空格）
                     # message_text格式: "📎 {filename_part}{size_part}"
                     # 计算文件名在文本中的位置
-                    emoji_len = 2  # 📎 emoji通常占2个字符位置
+                    emoji_len = len("📎")  # emoji的实际长度
                     space_len = 1  # 空格
                     filename_start_in_text = emoji_len + space_len
                     filename_end_in_text = message_text.find(" (")
@@ -940,7 +960,7 @@ class ChatClientGUI:
                     # 添加文件链接（找到文件名部分，跳过📎 emoji和空格）
                     # message_text格式: "📎 {filename_part}{size_part}"
                     # 计算文件名在文本中的位置
-                    emoji_len = 2  # 📎 emoji通常占2个字符位置
+                    emoji_len = len("📎")  # emoji的实际长度
                     space_len = 1  # 空格
                     filename_start_in_text = emoji_len + space_len
                     filename_end_in_text = message_text.find(" (")
@@ -1053,9 +1073,22 @@ class ChatClientGUI:
         """鼠标进入文件链接区域"""
         self.messages_display.config(cursor="hand2")
 
+    def on_mouse_move(self, event):
+        """鼠标移动事件处理，动态设置光标"""
+        # 获取鼠标当前位置的文本索引
+        index = self.messages_display.index(f"@{event.x},{event.y}")
+        # 获取该位置的所有tags
+        tags = self.messages_display.tag_names(index)
+
+        # 如果该位置有file_link标签，显示手型光标，否则显示箭头光标
+        if "file_link" in tags:
+            self.messages_display.config(cursor="hand2")
+        else:
+            self.messages_display.config(cursor="arrow")
+
     def on_file_link_leave(self, event):
         """鼠标离开文件链接区域"""
-        self.messages_display.config(cursor="")
+        self.messages_display.config(cursor="arrow")
 
     def on_file_link_click(self, event):
         """处理文件链接点击事件"""
@@ -1074,6 +1107,25 @@ class ChatClientGUI:
 
         if file_path:
             if os.path.exists(file_path):
+                # 获取文件扩展名
+                _, file_extension = os.path.splitext(file_path)
+                file_extension = file_extension.lower()
+
+                # 定义安全的文件类型列表
+                safe_extensions = ['.txt', '.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.doc', '.docx', '.xls', '.xlsx', '.ppt',
+                                   '.pptx', '.mp3', '.wav', '.mp4', '.avi', '.mov', '.zip', '.rar', '.7z', '.py', '.js', '.html', '.css', '.json', '.xml']
+
+                # 如果是潜在危险的文件类型，提醒用户
+                dangerous_extensions = [
+                    '.exe', '.bat', '.cmd', '.com', '.scr', '.vbs', '.js', '.msi', '.jar', '.apk']
+
+                if file_extension in dangerous_extensions:
+                    response = messagebox.askyesno(
+                        "安全警告",
+                        f"警告：文件 '{os.path.basename(file_path)}' 可能包含恶意代码。\n\n文件类型: {file_extension}\n是否仍要打开？\n\n建议：扫描病毒后再打开。")
+                    if not response:
+                        return  # 用户选择不打开
+
                 # 使用系统默认程序打开文件
                 try:
                     if platform.system() == 'Windows':
@@ -1085,7 +1137,8 @@ class ChatClientGUI:
                 except Exception as e:
                     messagebox.showerror("打开文件错误", f"无法打开文件: {str(e)}")
             else:
-                messagebox.showwarning("文件不存在", f"文件不存在或已被删除:\n{file_path}\n\n可能的原因:\n1. 发送者删除了原文件\n2. 文件传输过程中出现错误\n3. 文件尚未完全下载")
+                messagebox.showwarning(
+                    "文件不存在", f"文件不存在或已被删除:\n{file_path}\n\n可能的原因:\n1. 发送者删除了原文件\n2. 文件传输过程中出现错误\n3. 文件尚未完全下载")
         else:
             messagebox.showwarning("文件信息缺失", "无法获取文件路径信息，请重新接收文件")
 
@@ -1144,38 +1197,40 @@ class ChatClientGUI:
         if event.widget == self.master:
             # 更新界面布局
             self.master.update_idletasks()
-    
+
     def initiate_video_call(self):
         """发起视频通话"""
         if not self.connected:
             messagebox.showwarning("警告", "未连接到服务器！")
             return
-        
+
         # 检查是否已经有视频通话正在进行
         if self.video_call_active:
-            messagebox.showwarning("警告", f"您正在与 {self.video_call_with} 进行视频通话！")
+            messagebox.showwarning(
+                "警告", f"您正在与 {self.video_call_with} 进行视频通话！")
             return
-        
+
         # 检查是否有摄像头
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
             messagebox.showerror("错误", "无法打开摄像头！")
             return
         cap.release()
-        
+
         # 选择要呼叫的用户
         if self.current_chat == "聊天室":
             messagebox.showinfo("提示", "请选择一个用户进行视频通话")
             return
-        
+
         target_user = self.current_chat
         confirm = messagebox.askyesno("视频通话", f"确定要向 {target_user} 发起视频通话吗？")
         if confirm:
             # 发送视频通话请求
             video_call_request = f"/VIDEO_CALL_REQUEST|{target_user}"
             self.send_message_raw(video_call_request)
-            self.add_message_to_history("聊天室", f"系统: 已向 {target_user} 发起视频通话请求")
-    
+            self.add_message_to_history(
+                "聊天室", f"系统: 已向 {target_user} 发起视频通话请求")
+
     def receive_video_call_request(self, caller):
         """接收视频通话请求"""
         response = messagebox.askyesno("视频通话请求", f"{caller} 邀请您进行视频通话，是否接受？")
@@ -1188,98 +1243,102 @@ class ChatClientGUI:
             # 拒绝视频通话
             reject_msg = f"/VIDEO_CALL_REJECT|{caller}"
             self.send_message_raw(reject_msg)
-    
+
     def answer_video_call(self):
         """接听视频通话"""
         if self.video_call_with:
             self.start_video_call(self.video_call_with, is_caller=False)
-    
+
     def end_video_call(self):
         """结束视频通话"""
         if self.video_call_active:
             # 发送结束视频通话消息
             end_msg = f"/VIDEO_CALL_END|{self.video_call_with}"
             self.send_message_raw(end_msg)
-            
+
             # 停止视频通话
             self.stop_video_call()
             self.add_message_to_history("聊天室", f"系统: 视频通话已结束")
-    
+
     def start_video_call(self, with_user, is_caller=True):
         """开始视频通话"""
         # 检查是否已经有视频通话正在进行
         if self.video_call_active:
             if self.video_call_with != with_user:
-                messagebox.showwarning("警告", f"您正在与 {self.video_call_with} 进行视频通话！")
+                messagebox.showwarning(
+                    "警告", f"您正在与 {self.video_call_with} 进行视频通话！")
             return
-        
+
         self.video_call_active = True
         self.video_call_with = with_user
-        
+
         # 打开本地摄像头
         self.local_video_cap = cv2.VideoCapture(0)
         if not self.local_video_cap.isOpened():
             messagebox.showerror("错误", "无法打开本地摄像头！")
             self.video_call_active = False
             return
-        
+
         # 设置摄像头参数以减少资源消耗
         self.local_video_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
         self.local_video_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
         self.local_video_cap.set(cv2.CAP_PROP_FPS, 15)
-        
+
         # 创建视频通话窗口
         self.create_video_call_window(is_caller)
-        
+
         # 启动视频传输线程
-        self.video_thread = threading.Thread(target=self.transmit_video, daemon=True)
+        self.video_thread = threading.Thread(
+            target=self.transmit_video, daemon=True)
         self.video_thread.start()
-        
+
         self.add_message_to_history("聊天室", f"系统: 与 {with_user} 的视频通话已开始")
-    
+
     def stop_video_call(self):
         """停止视频通话"""
         self.video_call_active = False
-        
+
         # 释放摄像头资源
         if self.local_video_cap:
             self.local_video_cap.release()
-        
+
         # 关闭视频窗口
         if self.local_video_window:
             self.local_video_window.destroy()
         if self.remote_video_window:
             self.remote_video_window.destroy()
-        
+
         # 重置变量
         self.local_video_cap = None
         self.local_video_window = None
         self.remote_video_window = None
         self.video_call_with = None
-    
+
     def create_video_call_window(self, is_caller):
         """创建视频通话窗口"""
         # 本地视频窗口
         self.local_video_window = tk.Toplevel(self.master)
         self.local_video_window.title("本地视频")
         self.local_video_window.geometry("300x200")
-        self.local_video_window.protocol("WM_DELETE_WINDOW", self.end_video_call)
-        
+        self.local_video_window.protocol(
+            "WM_DELETE_WINDOW", self.end_video_call)
+
         self.local_video_label = tk.Label(self.local_video_window)
         self.local_video_label.pack(fill=tk.BOTH, expand=True)
-        
+
         # 远程视频窗口
         self.remote_video_window = tk.Toplevel(self.master)
         self.remote_video_window.title(f"远程视频 - {self.video_call_with}")
         self.remote_video_window.geometry("400x300")
-        self.remote_video_window.protocol("WM_DELETE_WINDOW", self.end_video_call)
-        
+        self.remote_video_window.protocol(
+            "WM_DELETE_WINDOW", self.end_video_call)
+
         self.remote_video_label = tk.Label(self.remote_video_window)
         self.remote_video_label.pack(fill=tk.BOTH, expand=True)
-        
+
         # 开始更新视频帧
         self.update_local_video()
-    
+
     def update_local_video(self):
         """更新本地视频画面"""
         if self.video_call_active and self.local_video_cap:
@@ -1289,62 +1348,63 @@ class ChatClientGUI:
                 frame = cv2.resize(frame, (300, 200))
                 # 翻转帧（镜像效果）
                 frame = cv2.flip(frame, 1)
-                
+
                 # 转换颜色空间从BGR到RGB
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                
+
                 # 将numpy数组转换为图像
                 h, w = frame_rgb.shape[:2]
                 img = tk.PhotoImage(width=w, height=h)
-                
+
                 # 逐像素设置图像（这是简化实现，实际应用中可能需要更高效的方法）
                 for y in range(min(h, 300)):
                     for x in range(min(w, 300)):
                         r, g, b = frame_rgb[y, x]
                         hex_color = f"#{r:02x}{g:02x}{b:02x}"
                         img.put(hex_color, (x, y))
-                
+
                 self.local_video_label.img = img  # 保持引用防止被垃圾回收
                 self.local_video_label.configure(image=img)
-                
+
                 # 每30毫秒更新一次
                 self.local_video_window.after(30, self.update_local_video)
-    
+
     def transmit_video(self):
         """传输视频数据"""
         last_send_time = time.time()
         SEND_INTERVAL = 0.2  # 限制发送间隔为0.2秒（5fps）
-        
+
         while self.video_call_active and self.local_video_cap:
             ret, frame = self.local_video_cap.read()
             if not ret:
                 time.sleep(0.033)  # 30fps的延迟
                 continue
-                
+
             current_time = time.time()
             # 控制发送频率
             if current_time - last_send_time < SEND_INTERVAL:
                 time.sleep(0.033)  # 30fps的延迟
                 continue
-                
+
             # 编码帧为JPEG
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 40]  # 进一步降低质量以减少带宽
             result, encoded_image = cv2.imencode('.jpg', frame, encode_param)
             if result:
                 # 转换为base64编码并发送
-                image_data = base64.b64encode(encoded_image.tobytes()).decode('utf-8')
+                image_data = base64.b64encode(
+                    encoded_image.tobytes()).decode('utf-8')
                 video_data = f"/VIDEO_DATA|{self.video_call_with}|{image_data}"
-                
+
                 try:
                     # 发送视频数据
                     self.send_message_raw(video_data)
                 except Exception as e:
                     print(f"发送视频数据失败: {e}")
                     break
-                    
+
             last_send_time = current_time
             time.sleep(0.033)  # 30fps的延迟
-    
+
     def receive_video_data(self, sender, image_data):
         """接收并显示远程视频数据"""
         if hasattr(self, 'remote_video_label') and self.video_call_active:
@@ -1353,25 +1413,25 @@ class ChatClientGUI:
                 img_bytes = base64.b64decode(image_data)
                 nparr = np.frombuffer(img_bytes, np.uint8)
                 frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                
+
                 if frame is not None:
                     # 调整帧大小以适应显示区域
                     frame = cv2.resize(frame, (400, 300))
-                    
+
                     # 转换颜色空间从BGR到RGB
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    
+
                     # 将numpy数组转换为图像
                     h, w = frame_rgb.shape[:2]
                     img = tk.PhotoImage(width=w, height=h)
-                    
+
                     # 逐像素设置图像
                     for y in range(min(h, 300)):
                         for x in range(min(w, 400)):
                             r, g, b = frame_rgb[y, x]
                             hex_color = f"#{r:02x}{g:02x}{b:02x}"
                             img.put(hex_color, (x, y))
-                    
+
                     self.remote_video_label.img = img  # 保持引用防止被垃圾回收
                     self.remote_video_label.configure(image=img)
             except Exception as e:
