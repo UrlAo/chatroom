@@ -424,7 +424,7 @@ class ChatClientGUI:
 
         # 获取服务器地址和端口
         server_ip = simpledialog.askstring(
-            "服务器地址", "请输入服务器IP地址:", initialvalue="127.0.0.1")
+            "服务器地址", "请输入服务器IP地址:", initialvalue="192.168.110.107")
         if not server_ip:
             return
 
@@ -684,18 +684,22 @@ class ChatClientGUI:
         elif message.startswith("/VIDEO_CALL_INVITE|"):
             # 视频通话邀请
             caller = message.split('|')[1]
+            print(f"DEBUG: 收到视频通话邀请，来自 {caller}")  # 调试信息
             self.master.after(0, self.receive_video_call_request, caller)
         elif message.startswith("/VIDEO_CALL_START|"):
             # 视频通话开始
             caller = message.split('|')[1]
+            print(f"DEBUG: 收到视频通话开始，来自 {caller}")  # 调试信息
             self.master.after(0, self.start_video_call, caller, False)
         elif message.startswith("/VIDEO_CALL_REJECTED|"):
             # 视频通话被拒绝
             caller = message.split('|')[1]
+            print(f"DEBUG: 收到视频通话拒绝，来自 {caller}")  # 调试信息
             self.master.after(0, lambda: messagebox.showinfo("视频通话", f"{caller} 拒绝了您的视频通话请求"))
         elif message.startswith("/VIDEO_CALL_ENDED|"):
             # 视频通话结束
             caller = message.split('|')[1]
+            print(f"DEBUG: 收到视频通话结束，来自 {caller}")  # 调试信息
             self.master.after(0, lambda: messagebox.showinfo("视频通话", f"{caller} 结束了视频通话"))
             if self.video_call_active:
                 self.master.after(0, self.stop_video_call)
