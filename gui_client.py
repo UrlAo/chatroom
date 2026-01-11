@@ -574,7 +574,28 @@ class ChatClientGUI:
             sender_name = None
             file_content = file_message
 
-            if "：" in file_message or ":" in file_message:
+            # 检查是否是私聊消息格式
+            is_private_msg = file_message.startswith("[私聊")
+            if is_private_msg:
+                # 提取私聊来源用户
+                sender_start = file_message.find("[私聊来自") + 5  # "[私聊来自"的长度
+                if sender_start > 4:
+                    sender_end = file_message.find("]", sender_start)
+                    if sender_end > sender_start:
+                        sender_name = file_message[sender_start:sender_end]
+                        # 移除私聊标签，获取实际内容
+                        content_after_bracket = file_message[sender_end + 1:].strip()
+                        # 检查是否有冒号分隔符
+                        if content_after_bracket.startswith(sender_name + "：") or content_after_bracket.startswith(sender_name + ":"):
+                            # 移除用户名和冒号部分，获取剩余内容
+                            separator_pos = content_after_bracket.find("：")
+                            if separator_pos == -1:  # 没找到中文冒号，尝试英文冒号
+                                separator_pos = content_after_bracket.find(":")
+                            if separator_pos != -1:
+                                file_content = content_after_bracket[separator_pos + 1:].strip()
+                        else:
+                            file_content = content_after_bracket
+            elif "：" in file_message or ":" in file_message:
                 # 查找冒号分隔符（中文或英文）
                 separator = "：" if "：" in file_message else ":"
                 parts_msg = file_message.split(separator, 1)
@@ -635,9 +656,11 @@ class ChatClientGUI:
 
             # 确定聊天目标（群聊或私聊）
             chat_target = "聊天室"
-            if sender_name and sender_name != self.username:
-                # 如果是私聊，可能需要检查消息来源
-                # 这里暂时都放到聊天室，可以根据实际需求调整
+            if is_private_msg and sender_name and sender_name != self.username:
+                # 这是私聊文件消息
+                chat_target = sender_name
+            elif sender_name and sender_name != self.username:
+                # 如果是群聊中的文件消息
                 pass
 
             if is_own_file:
@@ -684,22 +707,18 @@ class ChatClientGUI:
         elif message.startswith("/VIDEO_CALL_INVITE|"):
             # 视频通话邀请
             caller = message.split('|')[1]
-            print(f"DEBUG: 收到视频通话邀请，来自 {caller}")  # 调试信息
             self.master.after(0, self.receive_video_call_request, caller)
         elif message.startswith("/VIDEO_CALL_START|"):
             # 视频通话开始
             caller = message.split('|')[1]
-            print(f"DEBUG: 收到视频通话开始，来自 {caller}")  # 调试信息
             self.master.after(0, self.start_video_call, caller, False)
         elif message.startswith("/VIDEO_CALL_REJECTED|"):
             # 视频通话被拒绝
             caller = message.split('|')[1]
-            print(f"DEBUG: 收到视频通话拒绝，来自 {caller}")  # 调试信息
             self.master.after(0, lambda: messagebox.showinfo("视频通话", f"{caller} 拒绝了您的视频通话请求"))
         elif message.startswith("/VIDEO_CALL_ENDED|"):
             # 视频通话结束
             caller = message.split('|')[1]
-            print(f"DEBUG: 收到视频通话结束，来自 {caller}")  # 调试信息
             self.master.after(0, lambda: messagebox.showinfo("视频通话", f"{caller} 结束了视频通话"))
             if self.video_call_active:
                 self.master.after(0, self.stop_video_call)
@@ -725,8 +744,14 @@ class ChatClientGUI:
                 sender_end = message.find("]", sender_start)
                 if sender_end > sender_start:
                     sender = message[sender_start:sender_end]
-                    # 添加到该用户的私聊历史
-                    self.add_message_to_history(sender, message)
+                    # 检查是否是文件消息
+                    if "/FILE|" in message:
+                        # 这是一个包含文件的私聊消息，需要特殊处理
+                        # 提取消息中的文件信息
+                        self.handle_file_receive(message)
+                    else:
+                        # 添加到该用户的私聊历史
+                        self.add_message_to_history(sender, message)
         elif message.startswith("【系统广播】"):
             # 系统广播消息，添加到所有聊天（包括私聊）
             # 添加到聊天室
@@ -737,7 +762,13 @@ class ChatClientGUI:
                     self.add_message_to_history(chat_target, message)
         else:
             # 普通群聊消息
-            self.add_message_to_history("聊天室", message)
+            # 检查是否是文件消息（包含/FILE|）
+            if "/FILE|" in message:
+                # 这是一个包含文件的消息，需要特殊处理
+                self.handle_file_receive(message)
+            else:
+                # 普通群聊消息
+                self.add_message_to_history("聊天室", message)
 
     def recv_all(self, size):
         """接收指定长度的数据"""

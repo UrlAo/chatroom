@@ -105,7 +105,7 @@ class ChatServerGUI:
                 socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(
                 socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_socket.bind(("0.0.0.0", port))
+            self.server_socket.bind(("192.168.110.107", port))
             self.server_socket.listen(5)
 
             self.running = True
@@ -245,6 +245,55 @@ class ChatServerGUI:
                     self.append_message(f"{username} 发送了一个文件")
                     # 广播文件消息给其他客户端（包括发送者）
                     self.broadcast(f"{username}：{msg}", None)
+                elif msg.startswith('/VIDEO_CALL_REQUEST|'):
+                    # 处理视频通话请求
+                    # 格式：/VIDEO_CALL_REQUEST|target_user
+                    target_user = msg.split('|')[1]
+                    # 检查目标用户是否存在
+                    target_exists = any(u == target_user for u in self.clients.values())
+                    if target_exists:
+                        # 发送给目标用户视频通话请求
+                        self.send_to_user(target_user, f"/VIDEO_CALL_INVITE|{username}")
+                        self.append_message(f"{username} 请求与 {target_user} 进行视频通话")
+                    else:
+                        # 目标用户不存在，发送错误消息给发起者
+                        error_msg = f"【系统】错误：用户 {target_user} 不在线"
+                        self.send_to_user(username, error_msg)
+                        self.append_message(f"{username} 尝试视频通话 {target_user}（用户不在线）")
+                elif msg.startswith('/VIDEO_CALL_ACCEPT|'):
+                    # 处理视频通话接受
+                    # 格式：/VIDEO_CALL_ACCEPT|target_user
+                    target_user = msg.split('|')[1]
+                    # 通知发起者对方接受了视频通话
+                    self.send_to_user(target_user, f"/VIDEO_CALL_START|{username}")
+                    self.append_message(f"{target_user} 接受了 {username} 的视频通话")
+                elif msg.startswith('/VIDEO_CALL_REJECT|'):
+                    # 处理视频通话拒绝
+                    # 格式：/VIDEO_CALL_REJECT|target_user
+                    target_user = msg.split('|')[1]
+                    # 通知发起者对方拒绝了视频通话
+                    self.send_to_user(target_user, f"/VIDEO_CALL_REJECTED|{username}")
+                    self.append_message(f"{target_user} 拒绝了 {username} 的视频通话")
+                elif msg.startswith('/VIDEO_CALL_END|'):
+                    # 处理视频通话结束
+                    # 格式：/VIDEO_CALL_END|target_user
+                    target_user = msg.split('|')[1]
+                    # 通知对方视频通话已结束
+                    self.send_to_user(target_user, f"/VIDEO_CALL_ENDED|{username}")
+                    self.append_message(f"{username} 与 {target_user} 的视频通话已结束")
+                elif msg.startswith('/VIDEO_DATA|'):
+                    # 处理视频数据
+                    # 格式：/VIDEO_DATA|target_user|video_data
+                    try:
+                        parts = msg.split('|', 2)  # 最多分割为3部分
+                        target_user = parts[1]
+                        video_data = parts[2]
+                        # 转发视频数据给目标用户
+                        video_forward = f"/VIDEO_DATA|{username}|{video_data}"
+                        self.send_to_user(target_user, video_forward)
+                        # 服务器不记录视频数据，以保护隐私
+                    except IndexError:
+                        self.append_message(f"视频数据格式错误: {username}")
                 elif msg == '/REQUEST_USERLIST':
                     # 处理用户列表请求
                     current_users = list(self.clients.values())
