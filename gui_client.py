@@ -584,8 +584,11 @@ class ChatClientGUI:
                 if "/FILE|" in message:
                     # 在主线程中处理文件接收
                     self.master.after(0, self.handle_file_receive, message)
-                # 解析消息类型并处理（包括文件消息在内的所有消息）
-                self.process_received_message(message)
+                    # 注意：对于文件消息，已经在handle_file_receive中通过process_received_message进行了处理
+                    # 所以这里不再单独处理
+                else:
+                    # 解析消息类型并处理（非文件消息）
+                    self.process_received_message(message)
 
             except Exception as e:
                 if self.connected:
@@ -632,14 +635,20 @@ class ChatClientGUI:
                 separator = "：" if "：" in file_message else ":"
                 parts_msg = file_message.split(separator, 1)
                 if len(parts_msg) == 2:
-                    sender_name = parts_msg[0].strip()
-                    file_content = parts_msg[1].strip()
-
+                    potential_sender = parts_msg[0].strip()
+                    # 检查是否是文件消息格式，避免将其他格式的消息误处理
+                    if parts_msg[1].strip().startswith("/FILE|"):
+                        sender_name = potential_sender
+                        file_content = parts_msg[1].strip()
+                    else:
+                        # 如果第二部分不是文件格式，可能是其他类型的消息
+                        sender_name = potential_sender
+                        file_content = parts_msg[1].strip()
+                else:
+                    sender_name = None
+                    file_content = file_message
             # 解析文件消息：/FILE|filename|filesize|base64data
-            if not file_content.startswith("/FILE|"):
-                self.add_message_to_history("聊天室", "系统: 文件消息格式错误")
-                return
-
+            # 使用maxsplit=3确保只分割前3个|，避免文件名中包含|导致的解析错误
             parts = file_content.split("|", 3)
             if len(parts) != 4:
                 self.add_message_to_history("聊天室", "系统: 文件消息格式错误")
@@ -1200,7 +1209,7 @@ class ChatClientGUI:
         # 仅处理根窗口的resize事件，避免组件resize事件重复触发
         if event.widget == self.master:
             # 更新界面布局
-            self.master.update_idletasks()
+            self.master.update_ididletasks()
 
     def initiate_video_call(self):
         """发起视频通话"""
@@ -1451,6 +1460,12 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
 
 
 

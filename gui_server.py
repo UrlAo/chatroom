@@ -241,34 +241,53 @@ class ChatServerGUI:
                         self.broadcast(f"{username}：{msg}", client_socket)
                 elif msg.startswith('/FILE|'):
                     # 处理文件传输消息
+                    # 首先验证文件消息格式是否正确
+                    file_parts = msg.split("|", 3)  # 只分割前3个|
+                    if len(file_parts) != 4 or file_parts[0] != "/FILE":
+                        # 文件格式不正确
+                        error_msg = f"【系统】错误：文件格式不正确"
+                        self.send_to_user(username, error_msg)
+                        self.append_message(
+                            f"{username} 发送的文件格式不正确")
+                        continue
+                    
                     # 检查是否是私聊文件消息
                     if msg.startswith('@'):
                         # 私聊文件消息格式：@target_user /FILE|filename|filesize|base64data
                         parts = msg.split(' ', 1)
                         if len(parts) == 2:
                             target_user = parts[0][1:].strip()  # 移除@符号并去除多余空格
-                            file_content = parts[1]
-                            # 检查目标用户是否存在
-                            target_exists = any(
-                                u == target_user for u in self.clients.values())
-                            if target_exists:
-                                # 发送给目标用户私聊文件消息
-                                sender_msg = f"[私聊给{target_user}] {username}：{file_content}"
-                                receiver_msg = f"[私聊来自{username}] {username}：{file_content}"
+                            # 对file_content再次使用maxsplit确保正确解析
+                            file_parts = parts[1].split("|", 3)  # 只分割前3个|
+                            if len(file_parts) == 4 and file_parts[0] == "/FILE":
+                                file_content = parts[1]  # 保持原始格式用于转发
+                                # 检查目标用户是否存在
+                                target_exists = any(
+                                    u == target_user for u in self.clients.values())
+                                if target_exists:
+                                    # 发送给目标用户私聊文件消息
+                                    sender_msg = f"[私聊给{target_user}] {username}：{file_content}"
+                                    receiver_msg = f"[私聊来自{username}] {username}：{file_content}"
 
-                                # 发送给发送者确认消息
-                                self.send_to_user(username, sender_msg)
-                                # 发送给接收者文件消息
-                                self.send_to_user(target_user, receiver_msg)
+                                    # 发送给发送者确认消息
+                                    self.send_to_user(username, sender_msg)
+                                    # 发送给接收者文件消息
+                                    self.send_to_user(target_user, receiver_msg)
 
-                                self.append_message(
-                                    f"{username} 私聊发送文件给 {target_user}")
+                                    self.append_message(
+                                        f"{username} 私聊发送文件给 {target_user}")
+                                else:
+                                    # 目标用户不存在，发送错误消息给发送者
+                                    error_msg = f"【系统】错误：用户 {target_user} 不在线"
+                                    self.send_to_user(username, error_msg)
+                                    self.append_message(
+                                        f"{username} 尝试私聊发送文件给 {target_user}（用户不在线）")
                             else:
-                                # 目标用户不存在，发送错误消息给发送者
-                                error_msg = f"【系统】错误：用户 {target_user} 不在线"
+                                # 文件格式不正确，发送错误消息给发送者
+                                error_msg = f"【系统】错误：文件格式不正确"
                                 self.send_to_user(username, error_msg)
                                 self.append_message(
-                                    f"{username} 尝试私聊发送文件给 {target_user}（用户不在线）")
+                                    f"{username} 发送的文件格式不正确")
                     else:
                         # 群聊文件消息
                         # 格式：/FILE|filename|filesize|base64data
