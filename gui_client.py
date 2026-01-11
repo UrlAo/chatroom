@@ -915,9 +915,7 @@ class ChatClientGUI:
                     msg_start = self.messages_display.index(tk.END)
                     self.messages_display.insert(tk.END, message_text)
                     msg_end = self.messages_display.index(tk.END + "-1c")
-                    # 应用气泡样式
-                    self.messages_display.tag_add(
-                        "message_sent", msg_start, msg_end)
+                    
                     # 添加文件链接（找到文件名部分，跳过📎 emoji和空格）
                     # message_text格式: "📎 {filename_part}{size_part}"
                     # 计算文件名在文本中的位置
@@ -938,6 +936,10 @@ class ChatClientGUI:
                     tag_id = f"file_tag_{self.file_tag_counter}"
                     self.file_tag_counter += 1
                     self.file_path_map[tag_id] = file_path
+                    
+                    # 先应用气泡样式，再应用文件链接样式，确保链接样式不被覆盖
+                    self.messages_display.tag_add(
+                        "message_sent", msg_start, msg_end)
                     self.messages_display.tag_add(
                         "file_link", file_start, file_end)
                     self.messages_display.tag_add(tag_id, file_start, file_end)
@@ -954,9 +956,7 @@ class ChatClientGUI:
                     msg_start = self.messages_display.index(tk.END)
                     self.messages_display.insert(tk.END, message_text)
                     msg_end = self.messages_display.index(tk.END + "-1c")
-                    # 应用气泡样式
-                    self.messages_display.tag_add(
-                        "message_received", msg_start, msg_end)
+                    
                     # 添加文件链接（找到文件名部分，跳过📎 emoji和空格）
                     # message_text格式: "📎 {filename_part}{size_part}"
                     # 计算文件名在文本中的位置
@@ -977,6 +977,10 @@ class ChatClientGUI:
                     tag_id = f"file_tag_{self.file_tag_counter}"
                     self.file_tag_counter += 1
                     self.file_path_map[tag_id] = file_path
+                    
+                    # 先应用气泡样式，再应用文件链接样式，确保链接样式不被覆盖
+                    self.messages_display.tag_add(
+                        "message_received", msg_start, msg_end)
                     self.messages_display.tag_add(
                         "file_link", file_start, file_end)
                     self.messages_display.tag_add(tag_id, file_start, file_end)
@@ -1447,3 +1451,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+

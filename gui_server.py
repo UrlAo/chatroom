@@ -183,8 +183,8 @@ class ChatServerGUI:
                 client_socket.close()
                 return
 
-            # 保存客户端和用户名的映射
-            self.clients[client_socket] = username
+            # 保存客户端和用户名的映射，去除可能的空白字符
+            self.clients[client_socket] = username.strip()
 
             # 更新客户端列表
             self.master.after(0, self.update_client_list)
@@ -246,7 +246,7 @@ class ChatServerGUI:
                         # 私聊文件消息格式：@target_user /FILE|filename|filesize|base64data
                         parts = msg.split(' ', 1)
                         if len(parts) == 2:
-                            target_user = parts[0][1:]  # 移除@符号
+                            target_user = parts[0][1:].strip()  # 移除@符号并去除多余空格
                             file_content = parts[1]
                             # 检查目标用户是否存在
                             target_exists = any(
