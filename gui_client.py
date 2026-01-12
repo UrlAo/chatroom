@@ -12,6 +12,7 @@ import time
 import cv2
 import numpy as np
 import json
+from PIL import Image, ImageTk
 import socket as udp_socket_module
 from threading import Thread
 try:
@@ -76,6 +77,15 @@ class ChatClientGUI:
         self.remote_udp_port = 9999  # 远程UDP端口
         self.local_udp_port = None  # 本地UDP端口（随机分配）
         self.video_recv_thread = None
+        
+        # 多人视频会议相关属性
+        self.multi_video_active = False  # 是否正在进行多人视频会议
+        self.multi_video_room_id = None  # 多人视频房间ID
+        self.multi_video_participants = {}  # 参与者信息 {username: {'frame': frame, 'udp_port': port}}
+        self.multi_video_window = None  # 多人视频窗口
+        self.multi_video_frames = {}  # 存储多个参与者的视频帧
+        self.camera_enabled = True  # 摄像头是否启用
+        self.multi_video_layout = []  # 记录视频窗口布局信息
 
         # 用户头像映射（用户名 -> 头像信息）
         self.user_avatars = {}
@@ -834,6 +844,59 @@ class ChatClientGUI:
                                   sender, video_data)
             except IndexError:
                 print(f"视频数据格式错误: {message}")
+        # 检查是否是多人视频会议相关消息
+        elif message.startswith("/MULTI_VIDEO_INVITE|"):
+            # 多人视频会议邀请
+            parts = message.split('|')
+            if len(parts) >= 3:
+                room_id = parts[1]
+                inviter = parts[2]
+                # 在聊天室中添加会议邀请消息
+                invite_msg = f"{inviter} 发起了一个视频会议，点击进入"
+                # 创建可点击的消息
+                clickable_msg = {
+                    "type": "multi_video_invite",
+                    "text": f"【多人视频会议】{invite_msg}",
+                    "room_id": room_id,
+                    "inviter": inviter
+                }
+                self.add_message_to_history("聊天室", clickable_msg)
+        elif message.startswith("/MULTI_VIDEO_JOIN|"):
+            # 有人加入多人视频会议
+            parts = message.split('|')
+            if len(parts) >= 3:
+                room_id = parts[1]
+                username = parts[2]
+                if self.multi_video_active and self.multi_video_room_id == room_id:
+                    # 添加到参与者列表
+                    self.multi_video_participants[username] = {'frame': None, 'udp_port': None}
+                    print(f"{username} 加入了多人视频会议")
+        elif message.startswith("/MULTI_VIDEO_LEAVE|"):
+            # 有人离开多人视频会议
+            parts = message.split('|')
+            if len(parts) >= 3:
+                room_id = parts[1]
+                username = parts[2]
+                if self.multi_video_active and self.multi_video_room_id == room_id:
+                    # 从参与者列表中移除
+                    if username in self.multi_video_participants:
+                        del self.multi_video_participants[username]
+                    print(f"{username} 离开了多人视频会议")
+        elif message.startswith("/MULTI_VIDEO_DATA|"):
+            # 多人视频会议数据
+            try:
+                parts = message.split('|', 3)  # 分割为4部分：命令|房间ID|发送者|数据
+                if len(parts) >= 4:
+                    room_id = parts[1]
+                    sender = parts[2]
+                    video_data = parts[3]
+                    # 只处理当前房间的数据
+                    if self.multi_video_active and self.multi_video_room_id == room_id:
+                        # 在主线程中处理多人视频数据
+                        self.master.after(0, self.receive_multi_video_data,
+                                          sender, video_data)
+            except IndexError:
+                print(f"多人视频数据格式错误: {message}")
         # 检查是否是系统消息（如用户上下线通知）
         elif message.startswith("【系统】"):
             # 系统消息添加到聊天室
@@ -944,7 +1007,72 @@ class ChatClientGUI:
         # 获取当前时间
         current_time = datetime.now().strftime("%H:%M")
 
-        if isinstance(msg, dict) and msg.get("type") == "file":
+        # 检查是否是多人视频会议邀请消息
+        if isinstance(msg, dict) and msg.get("type") == "multi_video_invite":
+            # 多人视频会议邀请消息
+            text = msg["text"]
+            room_id = msg["room_id"]
+            inviter = msg["inviter"]
+            is_creator = msg.get("is_creator", False)  # 是否为发起者
+            
+            # 先插入时间戳（居中）
+            timestamp_start = self.messages_display.index(tk.END)
+            self.messages_display.insert(
+                tk.END, f"{current_time}\n", "timestamp")
+            timestamp_end = self.messages_display.index(tk.END + "-1c")
+            self.messages_display.tag_add(
+                "timestamp", timestamp_start, timestamp_end)
+            
+            # 插入邀请消息
+            msg_start = self.messages_display.index(tk.END)
+            self.messages_display.insert(tk.END, f"{text}")
+            msg_end = self.messages_display.index(tk.END + "-1c")
+            
+            # 应用系统消息样式
+            self.messages_display.tag_add("message_system", msg_start, msg_end)
+            
+            # 如果不是发起者（即接收者），则显示点击进入按钮
+            if not is_creator or inviter != self.username:  # 如果不是自己发起的会议，则显示按钮
+                # 创建点击进入会议室的按钮
+                self.messages_display.insert(tk.END, "\n")  # 添加换行
+                button_frame = tk.Frame(
+                    self.messages_display, bg="#F5F5F5")  # 背景色
+                button_frame.columnconfigure(0, weight=1)
+                
+                # 创建进入会议室按钮
+                join_button = tk.Button(button_frame,
+                                            text="点击进入会议",
+                                            command=lambda r_id=room_id, i_name=inviter: self.join_multi_video_call(r_id, i_name),
+                                            font=("Microsoft YaHei", 10),
+                                            bg="#07C160",
+                                            fg="white",
+                                            relief="flat",
+                                            padx=10,
+                                            pady=5,
+                                            cursor="hand2")
+                join_button.grid(row=0, column=0, padx=5, pady=2)
+                
+                # 将按钮框架作为窗口插入到文本中
+                self.messages_display.window_create(tk.END, window=button_frame)
+            else:
+                # 如果是发起者，显示会议已创建的信息
+                self.messages_display.insert(tk.END, "\n")  # 添加换行
+                info_frame = tk.Frame(
+                    self.messages_display, bg="#F5F5F5")  # 背景色
+                info_frame.columnconfigure(0, weight=1)
+                
+                # 创建信息标签
+                info_label = tk.Label(info_frame,
+                                      text="会议已创建并自动加入",
+                                      font=("Microsoft YaHei", 10),
+                                      bg="#07C160",
+                                      fg="white",
+                                      relief="flat")
+                info_label.grid(row=0, column=0, padx=5, pady=2)
+                
+                # 将信息框架作为窗口插入到文本中
+                self.messages_display.window_create(tk.END, window=info_frame)
+        elif isinstance(msg, dict) and msg.get("type") == "file":
             # 文件消息
             text = msg["text"]
             file_path = msg.get("file_path", "")
@@ -1258,37 +1386,74 @@ class ChatClientGUI:
             self.master.update_idletasks()
 
     def initiate_video_call(self):
-        """发起视频通话"""
+        """发起视频通话或多人视频会议"""
         if not self.connected:
             messagebox.showwarning("警告", "未连接到服务器！")
             return
 
-        # 检查是否已经有视频通话正在进行
-        if self.video_call_active:
-            messagebox.showwarning(
-                "警告", f"您正在与 {self.video_call_with} 进行视频通话！")
-            return
+        # 如果当前聊天对象是聊天室，则发起多人视频会议
+        if self.current_chat == "聊天室":
+            self.initiate_multi_video_call()
+        else:
+            # 检查是否已经有视频通话正在进行
+            if self.video_call_active:
+                messagebox.showwarning(
+                    "警告", f"您正在与 {self.video_call_with} 进行视频通话！")
+                return
 
+            # 检查是否有摄像头
+            cap = cv2.VideoCapture(0)
+            if not cap.isOpened():
+                messagebox.showerror("错误", "无法打开摄像头！")
+                return
+            cap.release()
+
+            target_user = self.current_chat
+            confirm = messagebox.askyesno("视频通话", f"确定要向 {target_user} 发起视频通话吗？")
+            if confirm:
+                # 发送视频通话请求
+                video_call_request = f"/VIDEO_CALL_REQUEST|{target_user}"
+                self.send_message_raw(video_call_request)
+                self.add_message_to_history(
+                    "聊天室", f"系统: 已向 {target_user} 发起视频通话请求")
+    
+    def initiate_multi_video_call(self):
+        """发起多人视频会议"""
+        # 检查是否已经有视频通话正在进行
+        if self.video_call_active or self.multi_video_active:
+            messagebox.showwarning(
+                "警告", "您已经在一个视频通话中！")
+            return
+        
         # 检查是否有摄像头
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
             messagebox.showerror("错误", "无法打开摄像头！")
             return
         cap.release()
-
-        # 选择要呼叫的用户
-        if self.current_chat == "聊天室":
-            messagebox.showinfo("提示", "请选择一个用户进行视频通话")
-            return
-
-        target_user = self.current_chat
-        confirm = messagebox.askyesno("视频通话", f"确定要向 {target_user} 发起视频通话吗？")
-        if confirm:
-            # 发送视频通话请求
-            video_call_request = f"/VIDEO_CALL_REQUEST|{target_user}"
-            self.send_message_raw(video_call_request)
-            self.add_message_to_history(
-                "聊天室", f"系统: 已向 {target_user} 发起视频通话请求")
+        
+        # 生成随机房间ID
+        import random
+        room_id = f"multi_{random.randint(1000, 9999)}"
+        self.multi_video_room_id = room_id
+        
+        # 发送多人视频会议邀请消息
+        multi_video_invite = f"/MULTI_VIDEO_INVITE|{room_id}|{self.username}"
+        self.send_message_raw(multi_video_invite)
+        
+        # 在聊天室中添加会议发起消息（使用结构化消息格式，标记为发起者）
+        invite_msg = f"{self.username} 发起了一个视频会议"
+        clickable_msg = {
+            "type": "multi_video_invite",
+            "text": f"【多人视频会议】{invite_msg}",
+            "room_id": room_id,
+            "inviter": self.username,
+            "is_creator": True  # 标记发起者，用于区分显示
+        }
+        self.add_message_to_history("聊天室", clickable_msg)
+        
+        # 自动加入会议
+        self.join_multi_video_call(room_id, self.username)
 
     def receive_video_call_request(self, caller):
         """接收视频通话请求"""
@@ -1498,6 +1663,37 @@ class ChatClientGUI:
         self.remote_ip = None
         self.remote_udp_port = None
 
+    def join_multi_video_call(self, room_id, inviter):
+        """加入多人视频会议"""
+        # 检查是否已经有视频通话正在进行
+        if self.video_call_active or self.multi_video_active:
+            messagebox.showwarning(
+                "警告", "您已经在一个视频通话中！")
+            return
+        
+        # 检查是否有摄像头
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            messagebox.showerror("错误", "无法打开摄像头！")
+            return
+        cap.release()
+        
+        self.multi_video_room_id = room_id
+        self.multi_video_active = True
+        
+        # 添加当前用户到参与者列表
+        self.multi_video_participants = {}
+        self.multi_video_participants[self.username] = {'frame': None, 'udp_port': None}
+        
+        # 发送加入消息到服务器
+        join_msg = f"/MULTI_VIDEO_JOIN|{room_id}|{self.username}"
+        self.send_message_raw(join_msg)
+        
+        # 启动多人视频窗口
+        self.start_multi_video_call(room_id)
+        
+        print(f"加入了多人视频会议: {room_id}")
+
     def create_video_call_window(self, is_caller):
         """创建视频通话窗口（现在为空函数，因为使用OpenCV窗口）"""
         # 此函数现在为空，因为视频显示由OpenCV窗口处理
@@ -1579,7 +1775,47 @@ class ChatClientGUI:
 
             last_send_time = current_time
             time.sleep(0.033)  # 30fps的延迟
+    
+    def transmit_multi_video(self):
+        """传输多人视频数据"""
+        # 设置UDP套接字
+        self.setup_udp_socket()
+        
+        last_send_time = time.time()
+        SEND_INTERVAL = 0.2  # 限制发送间隔为0.2秒（5fps）
 
+        while self.multi_video_active and self.local_video_cap:
+            ret, frame = self.local_video_cap.read()
+            if not ret:
+                time.sleep(0.033)  # 30fps的延迟
+                continue
+
+            current_time = time.time()
+            # 控制发送频率
+            if current_time - last_send_time < SEND_INTERVAL:
+                time.sleep(0.033)  # 30fps的延迟
+                continue
+
+            if self.camera_enabled:  # 只在摄像头开启时发送视频
+                # 编码帧为JPEG
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 40]  # 进一步降低质量以减少带宽
+                result, encoded_image = cv2.imencode('.jpg', frame, encode_param)
+                if result:
+                    # 转换为base64编码并发送
+                    image_data = base64.b64encode(
+                        encoded_image.tobytes()).decode('utf-8')
+                    
+                    # 通过TCP发送多人视频数据
+                    video_data = f"/MULTI_VIDEO_DATA|{self.multi_video_room_id}|{self.username}|{image_data}"
+                    try:
+                        self.send_message_raw(video_data)
+                    except Exception as e:
+                        print(f"发送多人视频数据失败: {e}")
+                        break
+
+            last_send_time = current_time
+            time.sleep(0.033)  # 30fps的延迟
+    
     def receive_video_via_udp(self):
         """通过UDP接收视频数据"""
         try:
@@ -1640,6 +1876,52 @@ class ChatClientGUI:
 
             except Exception as e:
                 print(f"视频解码错误: {e}")
+    
+    def receive_multi_video_data(self, sender, image_data):
+        """接收多人视频会议数据"""
+        if self.multi_video_active:
+            try:
+                # 解码base64图像数据
+                img_bytes = base64.b64decode(image_data)
+                nparr = np.frombuffer(img_bytes, np.uint8)
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+                if frame is not None:
+                    # 更新参与者视频帧
+                    if sender in self.multi_video_participants:
+                        self.multi_video_participants[sender]['frame'] = frame
+                        # 更新UI中的视频显示
+                        self.update_participant_video(sender, frame)
+                    else:
+                        # 如果是新参与者，添加到列表
+                        self.multi_video_participants[sender] = {'frame': frame, 'udp_port': None}
+                        # 更新布局
+                        self.update_video_layout()
+                        
+            except Exception as e:
+                print(f"多人视频解码错误: {e}")
+    
+    def update_participant_video(self, username, frame):
+        """更新特定参与者的视频显示"""
+        try:
+            # 调整帧大小以适应显示区域
+            resized_frame = cv2.resize(frame, (240, 180))
+            # 转换颜色格式从BGR到RGB
+            rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
+            # 转换为Tkinter兼容的PhotoImage格式
+            img = Image.fromarray(rgb_frame)
+            photo = ImageTk.PhotoImage(image=img)
+            
+            # 获取对应的视频显示标签
+            if username in self.multi_video_participants and \
+               'widget' in self.multi_video_participants[username]:
+                widget = self.multi_video_participants[username]['widget']
+                # 更新视频显示
+                widget.configure(image=photo)
+                widget.image = photo  # 保持引用，防止被垃圾回收
+                
+        except Exception as e:
+            print(f"更新参与者视频失败: {e}")
 
 
 def main():
