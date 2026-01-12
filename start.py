@@ -20,7 +20,7 @@ subprocess.Popen(
 time.sleep(2)
 
 # 2️⃣ 启动 3 个客户端（无终端）
-for _ in range(3):
+for _ in range(2):
     subprocess.Popen(
         [python_exe, client_path],
         creationflags=CREATE_NO_WINDOW

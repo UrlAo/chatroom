@@ -52,6 +52,7 @@ class ChatClientGUI:
         self.video_call_active = False
         self.local_video_cap = None
         self.remote_video_frame = None
+        self.local_video_frame = None  # 新增：存储本地视频帧
         self.video_call_with = None
         self.video_thread = None
         self.audio_thread = None
@@ -61,6 +62,13 @@ class ChatClientGUI:
         # 线程安全的窗口关闭标志
         self.local_display_stopped = threading.Event()
         self.remote_display_stopped = threading.Event()
+        
+        # 视频窗口布局相关属性
+        self.main_video_source = 'remote'  # 'remote' 表示主窗口显示远程视频，'local' 表示主窗口显示本地视频
+        self.small_video_source = 'local'  # 'local' 表示小窗口显示本地视频，'remote' 表示小窗口显示远程视频
+        self.main_window_name = 'Video Call - Main'
+        self.small_window_coords = (10, 10, 240, 180)  # x, y, width, height for small window
+        self.small_window_clicked = False
         
         # UDP视频传输相关属性
         self.udp_socket = None
@@ -1349,34 +1357,102 @@ class ChatClientGUI:
         # 标记窗口已初始化
         self.cv2_windows_initialized = True
         
-        # 启动本地视频显示线程
-        self.local_display_thread = Thread(target=self.display_local_video, daemon=True)
-        self.local_display_thread.start()
+        # 重置视频源
+        self.main_video_source = 'remote'
+        self.small_video_source = 'local'
         
-    def display_local_video(self):
-        """显示本地视频到OpenCV窗口"""
+        # 启动组合视频显示线程
+        self.combined_display_thread = Thread(target=self.display_combined_video, daemon=True)
+        self.combined_display_thread.start()
+        
+    def display_combined_video(self):
+        """显示组合视频（主视频+小视频）到单个OpenCV窗口"""
         try:
-            while self.video_call_active and self.local_video_cap and self.local_video_cap.isOpened():
-                ret, frame = self.local_video_cap.read()
-                if not ret:
-                    continue
+            # 创建主窗口
+            cv2.namedWindow(self.main_window_name, cv2.WINDOW_AUTOSIZE)
+            # 设置鼠标回调函数，用于检测小窗口点击
+            cv2.setMouseCallback(self.main_window_name, self.on_video_window_click)
+            
+            while self.video_call_active:
+                # 创建一个黑色画布作为基础
+                canvas = np.zeros((480, 640, 3), dtype=np.uint8)
                 
-                # 翻转帧（镜像效果）
-                frame = cv2.flip(frame, 1)
-                cv2.imshow('Local Video', frame)
+                # 获取主视频帧
+                main_frame = None
+                if self.main_video_source == 'remote' and self.remote_video_frame is not None:
+                    main_frame = self.remote_video_frame.copy()
+                elif self.main_video_source == 'local' and self.local_video_cap:
+                    ret, main_frame = self.local_video_cap.read()
+                    if ret:
+                        main_frame = cv2.flip(main_frame, 1)  # 镜像效果
+                    else:
+                        main_frame = np.zeros((480, 640, 3), dtype=np.uint8)  # 黑色帧
+                else:
+                    main_frame = np.zeros((480, 640, 3), dtype=np.uint8)  # 黑色帧
+                
+                # 获取小视频帧
+                small_frame = None
+                small_w, small_h = 240, 180  # 小窗口尺寸
+                if self.small_video_source == 'local' and self.local_video_cap:
+                    ret, small_frame = self.local_video_cap.read()
+                    if ret:
+                        small_frame = cv2.flip(small_frame, 1)  # 镜像效果
+                        small_frame = cv2.resize(small_frame, (small_w, small_h))
+                    else:
+                        small_frame = np.zeros((small_h, small_w, 3), dtype=np.uint8)  # 黑色帧
+                elif self.small_video_source == 'remote' and self.remote_video_frame is not None:
+                    small_frame = cv2.resize(self.remote_video_frame.copy(), (small_w, small_h))
+                else:
+                    small_frame = np.zeros((small_h, small_w, 3), dtype=np.uint8)  # 黑色帧
+                
+                # 调整主视频帧大小以适应画布
+                main_frame = cv2.resize(main_frame, (640, 480))
+                
+                # 将主视频帧放置到画布上
+                canvas = main_frame
+                
+                # 将小视频帧放置到画布的右上角
+                x_offset, y_offset = 20, 20  # 小窗口坐标
+                canvas[y_offset:y_offset+small_h, x_offset:x_offset+small_w] = small_frame
+                
+                # 在小视频窗口上绘制边框
+                cv2.rectangle(canvas, (x_offset, y_offset), (x_offset+small_w, y_offset+small_h), (0, 255, 0), 2)
+                
+                # 显示组合视频
+                cv2.imshow(self.main_window_name, canvas)
                 
                 # 按q键或检测到停止信号退出
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q') or key == 27:  # ESC键
                     break
+                
+                # 添加一点延迟以控制帧率
+                time.sleep(0.033)  # 约30fps
         except Exception as e:
-            print(f"显示本地视频时出错: {e}")
+            print(f"显示组合视频时出错: {e}")
         finally:
             # 设置停止事件
             self.local_display_stopped.set()
             # 不在这里调用destroyAllWindows，避免多线程冲突
             pass
-
+    
+    def on_video_window_click(self, event, x, y, flags, param):
+        """处理视频窗口点击事件"""
+        if event == cv2.EVENT_LBUTTONDOWN:
+            # 检查点击位置是否在小窗口区域内
+            small_x, small_y, small_w, small_h = 20, 20, 240, 180  # 小窗口坐标和尺寸
+            if small_x <= x <= small_x + small_w and small_y <= y <= small_y + small_h:
+                # 点击了小窗口，交换主次窗口的视频源
+                self.swap_video_sources()
+    
+    def swap_video_sources(self):
+        """交换主次窗口的视频源"""
+        # 交换视频源
+        temp_source = self.main_video_source
+        self.main_video_source = self.small_video_source
+        self.small_video_source = temp_source
+        print(f"视频源已交换: 主窗口={self.main_video_source}, 小窗口={self.small_video_source}")
+    
     def stop_video_call(self):
         """停止视频通话"""
         self.video_call_active = False
@@ -1390,11 +1466,11 @@ class ChatClientGUI:
             self.udp_socket.close()
         
         # 等待显示线程结束
-        if self.local_display_thread and self.local_display_thread.is_alive():
+        if hasattr(self, 'combined_display_thread') and self.combined_display_thread and self.combined_display_thread.is_alive():
             # 发送按键事件来中断显示循环
             cv2.destroyAllWindows()
             # 等待线程自然结束，最多等待2秒
-            self.local_display_thread.join(timeout=2)
+            self.combined_display_thread.join(timeout=2)
         
         if self.video_recv_thread and self.video_recv_thread.is_alive():
             self.video_recv_thread.join(timeout=2)
@@ -1410,6 +1486,7 @@ class ChatClientGUI:
         self.video_call_with = None
         self.remote_video_frame = None
         self.local_display_thread = None
+        self.combined_display_thread = None
         self.video_recv_thread = None
         
         # 重置线程停止事件
@@ -1527,12 +1604,9 @@ class ChatClientGUI:
                                     # 更新远程视频帧
                                     self.remote_video_frame = frame
                                     
-                                    # 如果启用了OpenCV窗口，则显示
-                                    if hasattr(self, 'cv2_windows_initialized') and self.cv2_windows_initialized:
-                                        cv2.imshow(f'Remote Video - {self.video_call_with}', frame)
-                                        key = cv2.waitKey(1) & 0xFF
-                                        if key == ord('q') or key == 27:  # ESC键
-                                            break
+                                    # 如果启用了OpenCV窗口，则更新远程视频帧
+                                    # 远程视频会在display_combined_video函数中显示在组合窗口中
+                                    pass
                         except Exception as e:
                             print(f"UDP视频数据解析错误: {e}")
                 except Exception as e:
@@ -1560,12 +1634,9 @@ class ChatClientGUI:
                     # 更新远程视频帧
                     self.remote_video_frame = frame
                     
-                    # 如果启用了OpenCV窗口，则显示
-                    if hasattr(self, 'cv2_windows_initialized') and self.cv2_windows_initialized:
-                        cv2.imshow(f'Remote Video - {self.video_call_with}', frame)
-                        key = cv2.waitKey(1) & 0xFF
-                        if key == ord('q') or key == 27:  # ESC键
-                            pass
+                    # 如果启用了OpenCV窗口，则更新远程视频帧
+                    # 远程视频会在display_combined_video函数中显示在组合窗口中
+                    pass
 
             except Exception as e:
                 print(f"视频解码错误: {e}")
