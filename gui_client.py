@@ -378,21 +378,11 @@ class ChatClientGUI:
                                          spacing2=2,
                                          spacing3=5)
 
-        # 文件链接样式
-        self.messages_display.tag_config("file_link",
-                                         foreground="#576B95",
-                                         underline=True,
-                                         font=("Microsoft YaHei", 11))
-        # 绑定点击事件和鼠标悬停事件
-        self.messages_display.tag_bind(
-            "file_link", "<Button-1>", self.on_file_link_click)
-        self.messages_display.tag_bind(
-            "file_link", "<Enter>", self.on_file_link_enter)
-        self.messages_display.tag_bind(
-            "file_link", "<Leave>", self.on_file_link_leave)
+        # 移除文件链接样式，因为我们现在使用按钮
+        # 原来的文件链接样式代码已移除
 
         # 绑定鼠标移动事件，用于动态管理光标
-        self.messages_display.bind("<Motion>", self.on_mouse_move)
+        # 由于不再使用链接样式，移除了动态光标变化
         self.messages_display.bind(
             "<Leave>", lambda e: self.messages_display.config(cursor="arrow"))
 
@@ -429,7 +419,7 @@ class ChatClientGUI:
 
         # 获取服务器地址和端口
         server_ip = simpledialog.askstring(
-            "服务器地址", "请输入服务器IP地址:", initialvalue="192.168.110.107")
+            "服务器地址", "请输入服务器IP地址:", initialvalue="127.0.0.1")
         if not server_ip:
             return
 
@@ -879,7 +869,7 @@ class ChatClientGUI:
         return username
 
     def insert_message_to_display(self, msg):
-        """将消息插入到显示区域（支持文件链接和微信风格气泡）"""
+        """将消息插入到显示区域（支持文件按钮和微信风格气泡）"""
         # 获取当前时间
         current_time = datetime.now().strftime("%H:%M")
 
@@ -909,7 +899,6 @@ class ChatClientGUI:
                 # 插入用户名和消息（在同一行）
                 username_display = self.get_user_display_name(sender)
                 username_tag = "username_sent" if is_own else "username_received"
-                message_text = f"📎 {filename_part}{size_part}"
 
                 if is_own:
                     # 我发送的文件消息（右侧对齐）
@@ -922,36 +911,37 @@ class ChatClientGUI:
                         "username_sent", username_start, username_end)
                     # 插入消息内容
                     msg_start = self.messages_display.index(tk.END)
-                    self.messages_display.insert(tk.END, message_text)
+                    self.messages_display.insert(
+                        tk.END, f"📎 {filename_part}{size_part}")
                     msg_end = self.messages_display.index(tk.END + "-1c")
-                    
-                    # 添加文件链接（找到文件名部分，跳过📎 emoji和空格）
-                    # message_text格式: "📎 {filename_part}{size_part}"
-                    # 计算文件名在文本中的位置
-                    emoji_len = len("📎")  # emoji的实际长度
-                    space_len = 1  # 空格
-                    filename_start_in_text = emoji_len + space_len
-                    filename_end_in_text = message_text.find(" (")
-                    if filename_end_in_text < 0:
-                        filename_end_in_text = len(message_text)
 
-                    # 计算在Text widget中的实际位置
-                    file_start = self.messages_display.index(
-                        f"{msg_start}+{filename_start_in_text}c")
-                    filename_length = filename_end_in_text - filename_start_in_text
-                    file_end = self.messages_display.index(
-                        f"{file_start}+{filename_length}c")
-
-                    tag_id = f"file_tag_{self.file_tag_counter}"
-                    self.file_tag_counter += 1
-                    self.file_path_map[tag_id] = file_path
-                    
-                    # 先应用气泡样式，再应用文件链接样式，确保链接样式不被覆盖
+                    # 应用气泡样式
                     self.messages_display.tag_add(
                         "message_sent", msg_start, msg_end)
-                    self.messages_display.tag_add(
-                        "file_link", file_start, file_end)
-                    self.messages_display.tag_add(tag_id, file_start, file_end)
+
+                    # 在下一行添加下载按钮
+                    self.messages_display.insert(tk.END, "\n")  # 添加换行
+                    button_frame = tk.Frame(
+                        self.messages_display, bg="#95EC69")  # 绿色背景
+                    button_frame.columnconfigure(0, weight=1)
+
+                    download_button = tk.Button(button_frame,
+                                                text=f"下载文件: {filename_part}",
+                                                command=lambda fp=file_path: self.download_file(
+                                                    fp),
+                                                font=("Microsoft YaHei", 10),
+                                                bg="#FFFFFF",
+                                                fg="#000000",
+                                                relief="flat",
+                                                padx=10,
+                                                pady=5,
+                                                cursor="hand2")
+                    download_button.grid(
+                        row=0, column=0, padx=5, pady=2, sticky="e")  # 右对齐
+
+                    # 将按钮框架作为窗口插入到文本中
+                    self.messages_display.window_create(
+                        tk.END, window=button_frame)
                 else:
                     # 其他人发送的文件消息（左侧对齐）
                     # 插入用户名
@@ -963,36 +953,37 @@ class ChatClientGUI:
                         "username_received", username_start, username_end)
                     # 插入消息内容
                     msg_start = self.messages_display.index(tk.END)
-                    self.messages_display.insert(tk.END, message_text)
+                    self.messages_display.insert(
+                        tk.END, f"📎 {filename_part}{size_part}")
                     msg_end = self.messages_display.index(tk.END + "-1c")
-                    
-                    # 添加文件链接（找到文件名部分，跳过📎 emoji和空格）
-                    # message_text格式: "📎 {filename_part}{size_part}"
-                    # 计算文件名在文本中的位置
-                    emoji_len = len("📎")  # emoji的实际长度
-                    space_len = 1  # 空格
-                    filename_start_in_text = emoji_len + space_len
-                    filename_end_in_text = message_text.find(" (")
-                    if filename_end_in_text < 0:
-                        filename_end_in_text = len(message_text)
 
-                    # 计算在Text widget中的实际位置
-                    file_start = self.messages_display.index(
-                        f"{msg_start}+{filename_start_in_text}c")
-                    filename_length = filename_end_in_text - filename_start_in_text
-                    file_end = self.messages_display.index(
-                        f"{file_start}+{filename_length}c")
-
-                    tag_id = f"file_tag_{self.file_tag_counter}"
-                    self.file_tag_counter += 1
-                    self.file_path_map[tag_id] = file_path
-                    
-                    # 先应用气泡样式，再应用文件链接样式，确保链接样式不被覆盖
+                    # 应用气泡样式
                     self.messages_display.tag_add(
                         "message_received", msg_start, msg_end)
-                    self.messages_display.tag_add(
-                        "file_link", file_start, file_end)
-                    self.messages_display.tag_add(tag_id, file_start, file_end)
+
+                    # 在下一行添加下载按钮
+                    self.messages_display.insert(tk.END, "\n")  # 添加换行
+                    button_frame = tk.Frame(
+                        self.messages_display, bg="#FFFFFF")  # 白色背景
+                    button_frame.columnconfigure(0, weight=1)
+
+                    download_button = tk.Button(button_frame,
+                                                text=f"下载文件: {filename_part}",
+                                                command=lambda fp=file_path: self.download_file(
+                                                    fp),
+                                                font=("Microsoft YaHei", 10),
+                                                bg="#E6E6E6",
+                                                fg="#000000",
+                                                relief="flat",
+                                                padx=10,
+                                                pady=5,
+                                                cursor="hand2")
+                    download_button.grid(
+                        row=0, column=0, padx=5, pady=2, sticky="w")  # 左对齐
+
+                    # 将按钮框架作为窗口插入到文本中
+                    self.messages_display.window_create(
+                        tk.END, window=button_frame)
 
             else:
                 self.messages_display.insert(tk.END, text + "\n")
@@ -1082,7 +1073,7 @@ class ChatClientGUI:
             self.messages_display.see(tk.END)
             self.messages_display.config(state=tk.DISABLED)
 
-    def on_file_link_enter(self, event):
+    def on_file_link_enter(self, event=None):
         """鼠标进入文件链接区域"""
         self.messages_display.config(cursor="hand2")
 
@@ -1155,6 +1146,42 @@ class ChatClientGUI:
         else:
             messagebox.showwarning("文件信息缺失", "无法获取文件路径信息，请重新接收文件")
 
+    def download_file(self, file_path):
+        """下载文件到本地"""
+        if file_path and os.path.exists(file_path):
+            # 获取文件扩展名
+            _, file_extension = os.path.splitext(file_path)
+            file_extension = file_extension.lower()
+
+            # 定义安全的文件类型列表
+            safe_extensions = ['.txt', '.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.doc', '.docx', '.xls', '.xlsx', '.ppt',
+                               '.pptx', '.mp3', '.wav', '.mp4', '.avi', '.mov', '.zip', '.rar', '.7z', '.py', '.js', '.html', '.css', '.json', '.xml']
+
+            # 如果是潜在危险的文件类型，提醒用户
+            dangerous_extensions = [
+                '.exe', '.bat', '.cmd', '.com', '.scr', '.vbs', '.js', '.msi', '.jar', '.apk']
+
+            if file_extension in dangerous_extensions:
+                response = messagebox.askyesno(
+                    "安全警告",
+                    f"警告：文件 '{os.path.basename(file_path)}' 可能包含恶意代码。\n\n文件类型: {file_extension}\n是否仍要打开？\n\n建议：扫描病毒后再打开。")
+                if not response:
+                    return  # 用户选择不打开
+
+            # 使用系统默认程序打开文件
+            try:
+                if platform.system() == 'Windows':
+                    os.startfile(file_path)
+                elif platform.system() == 'Darwin':  # macOS
+                    subprocess.run(['open', file_path])
+                else:  # Linux
+                    subprocess.run(['xdg-open', file_path])
+            except Exception as e:
+                messagebox.showerror("打开文件错误", f"无法打开文件: {str(e)}")
+        else:
+            messagebox.showwarning(
+                "文件不存在", f"文件不存在或已被删除:\n{file_path}\n\n可能的原因:\n1. 发送者删除了原文件\n2. 文件传输过程中出现错误\n3. 文件尚未完全下载")
+
     def update_users_list(self, users_list):
         """更新用户列表"""
         # 清空当前列表（保留"聊天室"选项）
@@ -1209,7 +1236,7 @@ class ChatClientGUI:
         # 仅处理根窗口的resize事件，避免组件resize事件重复触发
         if event.widget == self.master:
             # 更新界面布局
-            self.master.update_ididletasks()
+            self.master.update_idletasks()
 
     def initiate_video_call(self):
         """发起视频通话"""
@@ -1460,13 +1487,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
