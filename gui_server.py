@@ -105,7 +105,7 @@ class ChatServerGUI:
                 socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(
                 socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_socket.bind(("0.0.0.0", port))  # 修改此处，使用"0.0.0.0"而不是特定IP
+            self.server_socket.bind(("10.206.28.168", port))  # 修改此处，使用"0.0.0.0"而不是特定IP
             self.server_socket.listen(5)
 
             self.running = True

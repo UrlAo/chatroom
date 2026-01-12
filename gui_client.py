@@ -12,6 +12,8 @@ import time
 import cv2
 import numpy as np
 import json
+import socket as udp_socket_module
+from threading import Thread
 try:
     import pygame
     pygame.mixer.init()
@@ -50,11 +52,16 @@ class ChatClientGUI:
         self.video_call_active = False
         self.local_video_cap = None
         self.remote_video_frame = None
-        self.local_video_window = None
-        self.remote_video_window = None
         self.video_call_with = None
         self.video_thread = None
         self.audio_thread = None
+        
+        # UDP视频传输相关属性
+        self.udp_socket = None
+        self.udp_port = 9999  # 默认UDP端口
+        self.remote_udp_port = 9999  # 远程UDP端口
+        self.local_udp_port = None  # 本地UDP端口（随机分配）
+        self.video_recv_thread = None
 
         # 用户头像映射（用户名 -> 头像信息）
         self.user_avatars = {}
@@ -149,9 +156,24 @@ class ChatClientGUI:
 
         # 刷新按钮
         self.refresh_button = tk.Button(
-            left_frame, text="刷新用户", command=self.request_user_list)
+            left_frame, 
+            text="🔄 刷新用户", 
+            command=self.request_user_list,
+            font=("Microsoft YaHei", 10, "bold"),
+            bg="#E0E0E0",
+            fg="#333333",
+            activebackground="#D0D0D0",
+            activeforeground="#333333",
+            relief="flat",
+            borderwidth=0,
+            padx=10,
+            pady=5)
         self.refresh_button.grid(
-            row=2, column=0, pady=(5, 0), padx=0, sticky="ew")
+            row=2, column=0, pady=(5, 0), padx=10, sticky="ew")
+        
+        # 添加鼠标悬停效果
+        self.refresh_button.bind("<Enter>", lambda e: self.refresh_button.config(bg="#D0D0D0"))
+        self.refresh_button.bind("<Leave>", lambda e: self.refresh_button.config(bg="#E0E0E0"))
 
         # 配置刷新按钮所在行的权重
         left_frame.grid_rowconfigure(2, weight=0)
@@ -306,13 +328,14 @@ class ChatClientGUI:
                                          lmargin1=200,  # 左边距，控制消息整体位置
                                          lmargin2=200,  # 左边距，控制消息整体位置
                                          rmargin=20,   # 右边距
-                                         spacing1=0,
+                                         spacing1=5,
                                          spacing2=0,
-                                         spacing3=0,
+                                         spacing3=5,
                                          relief="flat",
                                          borderwidth=8,
                                          wrap="word",
-                                         justify="right")
+                                         justify="right",
+                                         offset=10)  # 添加偏移以模拟圆角效果
 
         # 接收的消息（左侧，微信白色背景）
         self.messages_display.tag_config("message_received",
@@ -321,13 +344,14 @@ class ChatClientGUI:
                                          lmargin1=20,   # 左边距
                                          lmargin2=20,   # 左边距
                                          rmargin=200,  # 右边距，控制消息整体位置
-                                         spacing1=0,
+                                         spacing1=5,
                                          spacing2=0,
-                                         spacing3=0,
+                                         spacing3=5,
                                          relief="flat",
                                          borderwidth=8,
                                          wrap="word",
-                                         justify="left")
+                                         justify="left",
+                                         offset=10)  # 添加偏移以模拟圆角效果
 
         # 用户名样式
         self.messages_display.tag_config("username",
@@ -420,7 +444,7 @@ class ChatClientGUI:
 
         # 获取服务器地址和端口
         server_ip = simpledialog.askstring(
-            "服务器地址", "请输入服务器IP地址:", initialvalue="127.0.0.1")
+            "服务器地址", "请输入服务器IP地址:", initialvalue="10.206.28.168")
         if not server_ip:
             return
 
@@ -740,6 +764,30 @@ class ChatClientGUI:
                 users = [user for user in parts[1:] if user]  # 排除空字符串
                 # 在主线程中更新用户列表
                 self.master.after(0, self.update_users_list, users)
+        # 检查是否是UDP端口信息
+        elif message.startswith("/UDP_PORT|"):
+            # 格式：/UDP_PORT|port_number|ip_address（如果服务器提供IP）
+            # 或者：/UDP_PORT|port_number（需要从消息来源获取IP）
+            try:
+                parts = message.split('|')
+                if len(parts) >= 2:
+                    udp_port = int(parts[1])
+                    
+                    # 如果服务器也提供了IP地址
+                    if len(parts) >= 3:
+                        self.remote_ip = parts[2]
+                    else:
+                        # 从当前连接获取对方IP（这在P2P情况下可能不准确）
+                        # 实际应用中，服务器应该提供对方的公网IP
+                        # 这里使用一个默认值，实际部署时需要根据网络环境调整
+                        if not hasattr(self, 'remote_ip'):
+                            # 在实际应用中，这需要服务器提供正确的IP信息
+                            print("警告：服务器未提供对方IP，UDP通信可能失败")
+                            
+                    self.remote_udp_port = udp_port
+                    print(f"设置远程UDP端口: {self.remote_udp_port}, IP: {getattr(self, 'remote_ip', '未知')}")
+            except ValueError:
+                print(f"UDP端口格式错误: {message}")
         # 检查是否是视频通话相关消息
         elif message.startswith("/VIDEO_CALL_INVITE|"):
             # 视频通话邀请
@@ -784,14 +832,8 @@ class ChatClientGUI:
                 sender_end = message.find("]", sender_start)
                 if sender_end > sender_start:
                     sender = message[sender_start:sender_end]
-                    # 检查是否是文件消息
-                    if "/FILE|" in message:
-                        # 这是一个包含文件的私聊消息，需要特殊处理
-                        # 提取消息中的文件信息
-                        self.handle_file_receive(message)
-                    else:
-                        # 添加到该用户的私聊历史
-                        self.add_message_to_history(sender, message)
+                    # 添加到该用户的私聊历史
+                    self.add_message_to_history(sender, message)
         elif message.startswith("【系统广播】"):
             # 系统广播消息，添加到所有聊天（包括私聊）
             # 添加到聊天室
@@ -802,13 +844,7 @@ class ChatClientGUI:
                     self.add_message_to_history(chat_target, message)
         else:
             # 普通群聊消息
-            # 检查是否是文件消息（包含/FILE|）
-            if "/FILE|" in message:
-                # 这是一个包含文件的消息，需要特殊处理
-                self.handle_file_receive(message)
-            else:
-                # 普通群聊消息
-                self.add_message_to_history("聊天室", message)
+            self.add_message_to_history("聊天室", message)
 
     def recv_all(self, size):
         """接收指定长度的数据"""
@@ -899,7 +935,7 @@ class ChatClientGUI:
             text = msg["text"]
             file_path = msg.get("file_path", "")
             sender = msg.get("sender", "")
-            is_own = (sender == self.username)
+            is_own = (sender.strip() == self.username.strip())
 
             # 提取文件名部分
             if "[文件]" in text:
@@ -1025,7 +1061,8 @@ class ChatClientGUI:
                 if len(parts) == 2:
                     sender = parts[0].strip()
                     content = parts[1].strip()
-                    is_own = (sender == self.username)
+                    # 比较时同时去除两端空白字符，提高匹配准确性
+                    is_own = (sender.strip() == self.username.strip())
 
                     # 先插入时间戳（居中）
                     timestamp_start = self.messages_display.index(tk.END)
@@ -1284,7 +1321,6 @@ class ChatClientGUI:
         self.local_video_cap = cv2.VideoCapture(0)
         if not self.local_video_cap.isOpened():
             messagebox.showerror("错误", "无法打开本地摄像头！")
-            self.video_call_active = False
             return
 
         # 设置摄像头参数以减少资源消耗
@@ -1292,8 +1328,8 @@ class ChatClientGUI:
         self.local_video_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
         self.local_video_cap.set(cv2.CAP_PROP_FPS, 15)
 
-        # 创建视频通话窗口
-        self.create_video_call_window(is_caller)
+        # 初始化OpenCV视频窗口
+        self.initialize_cv2_video_windows()
 
         # 启动视频传输线程
         self.video_thread = threading.Thread(
@@ -1301,6 +1337,31 @@ class ChatClientGUI:
         self.video_thread.start()
 
         self.add_message_to_history("聊天室", f"系统: 与 {with_user} 的视频通话已开始")
+        
+    def initialize_cv2_video_windows(self):
+        """初始化OpenCV视频窗口"""
+        # 标记窗口已初始化
+        self.cv2_windows_initialized = True
+        
+        # 启动本地视频显示线程
+        self.local_display_thread = Thread(target=self.display_local_video, daemon=True)
+        self.local_display_thread.start()
+        
+    def display_local_video(self):
+        """显示本地视频到OpenCV窗口"""
+        while self.video_call_active and self.local_video_cap:
+            ret, frame = self.local_video_cap.read()
+            if ret:
+                # 翻转帧（镜像效果）
+                frame = cv2.flip(frame, 1)
+                cv2.imshow('Local Video', frame)
+                
+                # 按q键退出
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+        
+        # 确保窗口被销毁
+        cv2.destroyAllWindows()
 
     def stop_video_call(self):
         """停止视频通话"""
@@ -1309,76 +1370,54 @@ class ChatClientGUI:
         # 释放摄像头资源
         if self.local_video_cap:
             self.local_video_cap.release()
-
-        # 关闭视频窗口
-        if self.local_video_window:
-            self.local_video_window.destroy()
-        if self.remote_video_window:
-            self.remote_video_window.destroy()
+        
+        # 销毁OpenCV窗口
+        cv2.destroyAllWindows()
+        
+        # 关闭UDP套接字
+        if self.udp_socket:
+            self.udp_socket.close()
 
         # 重置变量
         self.local_video_cap = None
-        self.local_video_window = None
-        self.remote_video_window = None
         self.video_call_with = None
+        self.remote_video_frame = None
+        
+        # 重置UDP相关变量
+        self.udp_socket = None
+        self.remote_ip = None
+        self.remote_udp_port = None
 
     def create_video_call_window(self, is_caller):
-        """创建视频通话窗口"""
-        # 本地视频窗口
-        self.local_video_window = tk.Toplevel(self.master)
-        self.local_video_window.title("本地视频")
-        self.local_video_window.geometry("300x200")
-        self.local_video_window.protocol(
-            "WM_DELETE_WINDOW", self.end_video_call)
-
-        self.local_video_label = tk.Label(self.local_video_window)
-        self.local_video_label.pack(fill=tk.BOTH, expand=True)
-
-        # 远程视频窗口
-        self.remote_video_window = tk.Toplevel(self.master)
-        self.remote_video_window.title(f"远程视频 - {self.video_call_with}")
-        self.remote_video_window.geometry("400x300")
-        self.remote_video_window.protocol(
-            "WM_DELETE_WINDOW", self.end_video_call)
-
-        self.remote_video_label = tk.Label(self.remote_video_window)
-        self.remote_video_label.pack(fill=tk.BOTH, expand=True)
-
-        # 开始更新视频帧
-        self.update_local_video()
+        """创建视频通话窗口（现在为空函数，因为使用OpenCV窗口）"""
+        # 此函数现在为空，因为视频显示由OpenCV窗口处理
+        pass
 
     def update_local_video(self):
-        """更新本地视频画面"""
-        if self.video_call_active and self.local_video_cap:
-            ret, frame = self.local_video_cap.read()
-            if ret:
-                # 调整帧大小以适应显示区域
-                frame = cv2.resize(frame, (300, 200))
-                # 翻转帧（镜像效果）
-                frame = cv2.flip(frame, 1)
+        """更新本地视频画面（现在为空函数，因为使用OpenCV窗口）"""
+        # 此函数现在为空，因为视频显示由OpenCV窗口处理
+        pass
 
-                # 转换颜色空间从BGR到RGB
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-                # 将numpy数组转换为图像
-                h, w = frame_rgb.shape[:2]
-                img = tk.PhotoImage(width=w, height=h)
-
-                # 逐像素设置图像（这是简化实现，实际应用中可能需要更高效的方法）
-                for y in range(min(h, 300)):
-                    for x in range(min(w, 300)):
-                        r, g, b = frame_rgb[y, x]
-                        hex_color = f"#{r:02x}{g:02x}{b:02x}"
-                        img.put(hex_color, (x, y))
-
-                self.local_video_label.img = img  # 保持引用防止被垃圾回收
-                self.local_video_label.configure(image=img)
-
-                # 每30毫秒更新一次
-                self.local_video_window.after(30, self.update_local_video)
-
+    def setup_udp_socket(self):
+        """设置UDP套接字用于视频传输"""
+        if self.udp_socket:
+            self.udp_socket.close()
+        
+        self.udp_socket = udp_socket_module.socket(udp_socket_module.AF_INET, udp_socket_module.SOCK_DGRAM)
+        # 绑定到任意可用端口
+        self.udp_socket.bind(('', 0))
+        self.local_udp_port = self.udp_socket.getsockname()[1]
+        print(f"UDP套接字绑定到端口: {self.local_udp_port}")
+        
+        # 启动接收线程
+        self.video_recv_thread = Thread(target=self.receive_video_via_udp, daemon=True)
+        self.video_recv_thread.start()
+        
     def transmit_video(self):
-        """传输视频数据"""
+        """通过UDP传输视频数据"""
+        # 设置UDP套接字
+        self.setup_udp_socket()
+        
         last_send_time = time.time()
         SEND_INTERVAL = 0.2  # 限制发送间隔为0.2秒（5fps）
 
@@ -1401,21 +1440,74 @@ class ChatClientGUI:
                 # 转换为base64编码并发送
                 image_data = base64.b64encode(
                     encoded_image.tobytes()).decode('utf-8')
-                video_data = f"/VIDEO_DATA|{self.video_call_with}|{image_data}"
-
+                
+                # 通过UDP发送视频数据
                 try:
-                    # 发送视频数据
-                    self.send_message_raw(video_data)
+                    # 发送本地UDP端口给服务器，以便它能转发给对方
+                    port_msg = f"/UDP_PORT|{self.local_udp_port}"
+                    self.send_message_raw(port_msg)
+                    
+                    # 通过UDP发送视频数据
+                    video_packet = f"{self.username}:{image_data}".encode('utf-8')
+                    # 需要知道对方的IP地址和UDP端口
+                    # 通常在建立连接时服务器会提供对方的网络信息
+                    if hasattr(self, 'remote_ip') and hasattr(self, 'remote_udp_port') and self.remote_ip and self.remote_udp_port:
+                        self.udp_socket.sendto(video_packet, (self.remote_ip, self.remote_udp_port))
+                    else:
+                        # 如果没有对方的IP信息，回退到TCP发送（保持兼容性）
+                        video_data = f"/VIDEO_DATA|{self.video_call_with}|{image_data}"
+                        self.send_message_raw(video_data)
                 except Exception as e:
-                    print(f"发送视频数据失败: {e}")
-                    break
+                    print(f"发送UDP视频数据失败: {e}, 尝试使用TCP")
+                    # 如果UDP失败，回退到TCP发送
+                    try:
+                        video_data = f"/VIDEO_DATA|{self.video_call_with}|{image_data}"
+                        self.send_message_raw(video_data)
+                    except Exception as tcp_e:
+                        print(f"TCP视频数据发送也失败: {tcp_e}")
+                        break
 
             last_send_time = current_time
             time.sleep(0.033)  # 30fps的延迟
 
+    def receive_video_via_udp(self):
+        """通过UDP接收视频数据"""
+        while self.video_call_active:
+            try:
+                data, addr = self.udp_socket.recvfrom(65536)  # 接收最大64KB数据
+                if data:
+                    try:
+                        # 解析数据格式: sender:image_data
+                        decoded_data = data.decode('utf-8')
+                        parts = decoded_data.split(':', 1)
+                        if len(parts) == 2:
+                            sender = parts[0]
+                            image_data = parts[1]
+                            
+                            # 解码base64图像数据
+                            img_bytes = base64.b64decode(image_data)
+                            nparr = np.frombuffer(img_bytes, np.uint8)
+                            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+                            if frame is not None:
+                                # 更新远程视频帧
+                                self.remote_video_frame = frame
+                                
+                                # 如果启用了OpenCV窗口，则显示
+                                if hasattr(self, 'cv2_windows_initialized') and self.cv2_windows_initialized:
+                                    cv2.imshow(f'Remote Video - {self.video_call_with}', frame)
+                                    if cv2.waitKey(1) & 0xFF == ord('q'):  # 按q键退出
+                                        break
+                    except Exception as e:
+                        print(f"UDP视频数据解析错误: {e}")
+            except Exception as e:
+                if self.video_call_active:  # 只有在视频通话活跃时才打印错误
+                    print(f"接收UDP视频数据错误: {e}")
+                break
+    
     def receive_video_data(self, sender, image_data):
-        """接收并显示远程视频数据"""
-        if hasattr(self, 'remote_video_label') and self.video_call_active:
+        """接收并显示远程视频数据（保留TCP方式以备兼容性）"""
+        if self.video_call_active:
             try:
                 # 解码base64图像数据
                 img_bytes = base64.b64decode(image_data)
@@ -1423,25 +1515,15 @@ class ChatClientGUI:
                 frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
                 if frame is not None:
-                    # 调整帧大小以适应显示区域
-                    frame = cv2.resize(frame, (400, 300))
+                    # 更新远程视频帧
+                    self.remote_video_frame = frame
+                    
+                    # 如果启用了OpenCV窗口，则显示
+                    if hasattr(self, 'cv2_windows_initialized') and self.cv2_windows_initialized:
+                        cv2.imshow(f'Remote Video - {self.video_call_with}', frame)
+                        if cv2.waitKey(1) & 0xFF == ord('q'):  # 按q键退出
+                            pass
 
-                    # 转换颜色空间从BGR到RGB
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-                    # 将numpy数组转换为图像
-                    h, w = frame_rgb.shape[:2]
-                    img = tk.PhotoImage(width=w, height=h)
-
-                    # 逐像素设置图像
-                    for y in range(min(h, 300)):
-                        for x in range(min(w, 400)):
-                            r, g, b = frame_rgb[y, x]
-                            hex_color = f"#{r:02x}{g:02x}{b:02x}"
-                            img.put(hex_color, (x, y))
-
-                    self.remote_video_label.img = img  # 保持引用防止被垃圾回收
-                    self.remote_video_label.configure(image=img)
             except Exception as e:
                 print(f"视频解码错误: {e}")
 
