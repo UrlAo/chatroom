@@ -8,6 +8,7 @@ import base64
 import subprocess
 import platform
 from datetime import datetime
+import time
 import cv2
 import numpy as np
 import json
@@ -687,6 +688,26 @@ class ChatClientGUI:
             if is_private_msg and sender_name and sender_name != self.username:
                 # 这是私聊文件消息
                 chat_target = sender_name
+            elif is_private_msg:
+                # 即使无法提取发送者姓名，只要是私聊格式的消息，就不应加入聊天室
+                # 可能是格式问题，但仍应视为私聊消息
+                # 为了安全起见，尝试从原始消息中提取发送者
+                if '[私聊来自' in file_message:
+                    # 提取私聊来源用户
+                    start_idx = file_message.find('[私聊来自') + 5
+                    end_idx = file_message.find(']', start_idx)
+                    if start_idx > 4 and end_idx > start_idx:
+                        extracted_sender = file_message[start_idx:end_idx]
+                        if extracted_sender and extracted_sender != self.username:
+                            chat_target = extracted_sender
+                        else:
+                            # 如果仍无法提取，可以忽略此消息或显示错误
+                            print(f'无法正确解析私聊文件消息: {file_message}')
+                            return  # 避免将无法解析的消息添加到聊天室
+                else:
+                    # 如果是私聊格式但无法解析，最好忽略
+                    print(f'无法解析的私聊文件消息: {file_message}')
+                    return  # 避免将无法解析的消息添加到聊天室
             elif sender_name and sender_name != self.username:
                 # 如果是群聊中的文件消息
                 pass
@@ -1073,29 +1094,8 @@ class ChatClientGUI:
             self.messages_display.see(tk.END)
             self.messages_display.config(state=tk.DISABLED)
 
-    def on_file_link_enter(self, event=None):
-        """鼠标进入文件链接区域"""
-        self.messages_display.config(cursor="hand2")
-
-    def on_mouse_move(self, event):
-        """鼠标移动事件处理，动态设置光标"""
-        # 获取鼠标当前位置的文本索引
-        index = self.messages_display.index(f"@{event.x},{event.y}")
-        # 获取该位置的所有tags
-        tags = self.messages_display.tag_names(index)
-
-        # 如果该位置有file_link标签，显示手型光标，否则显示箭头光标
-        if "file_link" in tags:
-            self.messages_display.config(cursor="hand2")
-        else:
-            self.messages_display.config(cursor="arrow")
-
-    def on_file_link_leave(self, event):
-        """鼠标离开文件链接区域"""
-        self.messages_display.config(cursor="arrow")
-
     def on_file_link_click(self, event):
-        """处理文件链接点击事件"""
+        """处理文件链接点击事件（保留原有功能以防需要）"""
         # 获取点击位置的索引
         index = self.messages_display.index(f"@{event.x},{event.y}")
 
@@ -1110,39 +1110,7 @@ class ChatClientGUI:
                 break
 
         if file_path:
-            if os.path.exists(file_path):
-                # 获取文件扩展名
-                _, file_extension = os.path.splitext(file_path)
-                file_extension = file_extension.lower()
-
-                # 定义安全的文件类型列表
-                safe_extensions = ['.txt', '.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.doc', '.docx', '.xls', '.xlsx', '.ppt',
-                                   '.pptx', '.mp3', '.wav', '.mp4', '.avi', '.mov', '.zip', '.rar', '.7z', '.py', '.js', '.html', '.css', '.json', '.xml']
-
-                # 如果是潜在危险的文件类型，提醒用户
-                dangerous_extensions = [
-                    '.exe', '.bat', '.cmd', '.com', '.scr', '.vbs', '.js', '.msi', '.jar', '.apk']
-
-                if file_extension in dangerous_extensions:
-                    response = messagebox.askyesno(
-                        "安全警告",
-                        f"警告：文件 '{os.path.basename(file_path)}' 可能包含恶意代码。\n\n文件类型: {file_extension}\n是否仍要打开？\n\n建议：扫描病毒后再打开。")
-                    if not response:
-                        return  # 用户选择不打开
-
-                # 使用系统默认程序打开文件
-                try:
-                    if platform.system() == 'Windows':
-                        os.startfile(file_path)
-                    elif platform.system() == 'Darwin':  # macOS
-                        subprocess.run(['open', file_path])
-                    else:  # Linux
-                        subprocess.run(['xdg-open', file_path])
-                except Exception as e:
-                    messagebox.showerror("打开文件错误", f"无法打开文件: {str(e)}")
-            else:
-                messagebox.showwarning(
-                    "文件不存在", f"文件不存在或已被删除:\n{file_path}\n\n可能的原因:\n1. 发送者删除了原文件\n2. 文件传输过程中出现错误\n3. 文件尚未完全下载")
+            self.download_file(file_path)
         else:
             messagebox.showwarning("文件信息缺失", "无法获取文件路径信息，请重新接收文件")
 
