@@ -55,6 +55,12 @@ class ChatClientGUI:
         self.video_call_with = None
         self.video_thread = None
         self.audio_thread = None
+        self.local_display_thread = None
+        self.video_recv_thread = None
+        
+        # 线程安全的窗口关闭标志
+        self.local_display_stopped = threading.Event()
+        self.remote_display_stopped = threading.Event()
         
         # UDP视频传输相关属性
         self.udp_socket = None
@@ -444,7 +450,7 @@ class ChatClientGUI:
 
         # 获取服务器地址和端口
         server_ip = simpledialog.askstring(
-            "服务器地址", "请输入服务器IP地址:", initialvalue="10.206.28.168")
+            "服务器地址", "请输入服务器IP地址:", initialvalue="192.168.110.64")
         if not server_ip:
             return
 
@@ -1349,19 +1355,27 @@ class ChatClientGUI:
         
     def display_local_video(self):
         """显示本地视频到OpenCV窗口"""
-        while self.video_call_active and self.local_video_cap:
-            ret, frame = self.local_video_cap.read()
-            if ret:
+        try:
+            while self.video_call_active and self.local_video_cap and self.local_video_cap.isOpened():
+                ret, frame = self.local_video_cap.read()
+                if not ret:
+                    continue
+                
                 # 翻转帧（镜像效果）
                 frame = cv2.flip(frame, 1)
                 cv2.imshow('Local Video', frame)
                 
-                # 按q键退出
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+                # 按q键或检测到停止信号退出
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q') or key == 27:  # ESC键
                     break
-        
-        # 确保窗口被销毁
-        cv2.destroyAllWindows()
+        except Exception as e:
+            print(f"显示本地视频时出错: {e}")
+        finally:
+            # 设置停止事件
+            self.local_display_stopped.set()
+            # 不在这里调用destroyAllWindows，避免多线程冲突
+            pass
 
     def stop_video_call(self):
         """停止视频通话"""
@@ -1371,17 +1385,36 @@ class ChatClientGUI:
         if self.local_video_cap:
             self.local_video_cap.release()
         
-        # 销毁OpenCV窗口
-        cv2.destroyAllWindows()
-        
         # 关闭UDP套接字
         if self.udp_socket:
             self.udp_socket.close()
-
+        
+        # 等待显示线程结束
+        if self.local_display_thread and self.local_display_thread.is_alive():
+            # 发送按键事件来中断显示循环
+            cv2.destroyAllWindows()
+            # 等待线程自然结束，最多等待2秒
+            self.local_display_thread.join(timeout=2)
+        
+        if self.video_recv_thread and self.video_recv_thread.is_alive():
+            self.video_recv_thread.join(timeout=2)
+        
+        # 最后在主线程中清理所有OpenCV窗口
+        try:
+            cv2.destroyAllWindows()
+        except:
+            pass
+        
         # 重置变量
         self.local_video_cap = None
         self.video_call_with = None
         self.remote_video_frame = None
+        self.local_display_thread = None
+        self.video_recv_thread = None
+        
+        # 重置线程停止事件
+        self.local_display_stopped.clear()
+        self.remote_display_stopped.clear()
         
         # 重置UDP相关变量
         self.udp_socket = None
@@ -1472,38 +1505,47 @@ class ChatClientGUI:
 
     def receive_video_via_udp(self):
         """通过UDP接收视频数据"""
-        while self.video_call_active:
-            try:
-                data, addr = self.udp_socket.recvfrom(65536)  # 接收最大64KB数据
-                if data:
-                    try:
-                        # 解析数据格式: sender:image_data
-                        decoded_data = data.decode('utf-8')
-                        parts = decoded_data.split(':', 1)
-                        if len(parts) == 2:
-                            sender = parts[0]
-                            image_data = parts[1]
-                            
-                            # 解码base64图像数据
-                            img_bytes = base64.b64decode(image_data)
-                            nparr = np.frombuffer(img_bytes, np.uint8)
-                            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-                            if frame is not None:
-                                # 更新远程视频帧
-                                self.remote_video_frame = frame
+        try:
+            while self.video_call_active:
+                try:
+                    data, addr = self.udp_socket.recvfrom(65536)  # 接收最大64KB数据
+                    if data:
+                        try:
+                            # 解析数据格式: sender:image_data
+                            decoded_data = data.decode('utf-8')
+                            parts = decoded_data.split(':', 1)
+                            if len(parts) == 2:
+                                sender = parts[0]
+                                image_data = parts[1]
                                 
-                                # 如果启用了OpenCV窗口，则显示
-                                if hasattr(self, 'cv2_windows_initialized') and self.cv2_windows_initialized:
-                                    cv2.imshow(f'Remote Video - {self.video_call_with}', frame)
-                                    if cv2.waitKey(1) & 0xFF == ord('q'):  # 按q键退出
-                                        break
-                    except Exception as e:
-                        print(f"UDP视频数据解析错误: {e}")
-            except Exception as e:
-                if self.video_call_active:  # 只有在视频通话活跃时才打印错误
+                                # 解码base64图像数据
+                                img_bytes = base64.b64decode(image_data)
+                                nparr = np.frombuffer(img_bytes, np.uint8)
+                                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+                                if frame is not None:
+                                    # 更新远程视频帧
+                                    self.remote_video_frame = frame
+                                    
+                                    # 如果启用了OpenCV窗口，则显示
+                                    if hasattr(self, 'cv2_windows_initialized') and self.cv2_windows_initialized:
+                                        cv2.imshow(f'Remote Video - {self.video_call_with}', frame)
+                                        key = cv2.waitKey(1) & 0xFF
+                                        if key == ord('q') or key == 27:  # ESC键
+                                            break
+                        except Exception as e:
+                            print(f"UDP视频数据解析错误: {e}")
+                except Exception as e:
+                    if not self.video_call_active:  # 如果视频通话已停止，则退出循环
+                        break
                     print(f"接收UDP视频数据错误: {e}")
-                break
+        except Exception as e:
+            print(f"接收UDP视频时出错: {e}")
+        finally:
+            # 设置停止事件
+            self.remote_display_stopped.set()
+            # 不在这里调用destroyAllWindows，避免多线程冲突
+            pass
     
     def receive_video_data(self, sender, image_data):
         """接收并显示远程视频数据（保留TCP方式以备兼容性）"""
@@ -1521,7 +1563,8 @@ class ChatClientGUI:
                     # 如果启用了OpenCV窗口，则显示
                     if hasattr(self, 'cv2_windows_initialized') and self.cv2_windows_initialized:
                         cv2.imshow(f'Remote Video - {self.video_call_with}', frame)
-                        if cv2.waitKey(1) & 0xFF == ord('q'):  # 按q键退出
+                        key = cv2.waitKey(1) & 0xFF
+                        if key == ord('q') or key == 27:  # ESC键
                             pass
 
             except Exception as e:
