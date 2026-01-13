@@ -33,29 +33,30 @@ class ChatClientGUI:
         try:
             # 1. 将 PIL 图片转换为 Tkinter 图片 (这一步必须在主线程，但很快)
             photo = ImageTk.PhotoImage(image=pil_image)
-            
+
             # 2. 找到对应的 Label 并更新
             if sender in self.multi_video_participants:
                 # 确保字典里有这个键
                 participant_data = self.multi_video_participants[sender]
-                
+
                 # 获取 widget (Label)
                 widget = participant_data.get('widget')
-                
+
                 if widget:
                     widget.configure(image=photo, text="")
-                    widget.image = photo # 重要：保持引用，防止被垃圾回收
+                    widget.image = photo  # 重要：保持引用，防止被垃圾回收
                 else:
                     # 如果还没有 widget (可能是刚加入的人)，先存起来
                     # 这里你可以选择调用 update_video_layout 来创建 widget
-                    pass 
-                    
+                    pass
+
                 # 更新一下最后收到帧的时间，防止被清理
                 self.last_frame_time[sender] = time.time()
-                
+
         except Exception as e:
             print(f"UI更新错误: {e}")
     # ====================【第四步修改结束】====================
+
     def __init__(self, master):
         self.master = master
         self.master.title("聊天室客户端")
@@ -73,11 +74,12 @@ class ChatClientGUI:
         self.video_frame_buffer = {}
         self.last_frame_time = {}  # 记录每个用户最后更新时间
         self.frame_update_interval = 0.067  # 15 FPS的时间间隔
-        self.video_process_queue = queue.Queue(maxsize=30) 
-        
+        self.video_process_queue = queue.Queue(maxsize=30)
+
         # 2. 启动唯一的后台处理线程 (消费者)
         # 注意：这里我们还没有定义 video_processing_worker，下一步写
-        self.processor_thread = threading.Thread(target=self.video_processing_worker, daemon=True)
+        self.processor_thread = threading.Thread(
+            target=self.video_processing_worker, daemon=True)
         self.processor_thread.start()
         # 存储不同聊天对象的消息（消息格式：字符串或字典{"type": "file", "text": "...", "file_path": "..."}）
         self.chat_history = {"聊天室": []}
@@ -686,6 +688,7 @@ class ChatClientGUI:
                     self.master.after(0, self.handle_connection_error, str(e))
                 break
     # ====================【第二步修改：新增方法】====================
+
     def video_processing_worker(self):
         """
         后台工人线程：
@@ -697,35 +700,37 @@ class ChatClientGUI:
             try:
                 # 1. 从队列获取数据 (sender是用户名, video_data是base64字符串)
                 sender, video_data = self.video_process_queue.get()
-                
+
                 # --- 下面是耗时操作，全部在后台完成，绝不卡顿主界面 ---
-                
+
                 # A. Base64 解码
                 img_bytes = base64.b64decode(video_data)
                 nparr = np.frombuffer(img_bytes, np.uint8)
                 frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                
+
                 if frame is not None:
                     # B. Resize (缩放) - 移到这里做！
                     # 强制缩放到 UI 显示的大小 (240x180)
                     resized_frame = cv2.resize(frame, (240, 180))
-                    
+
                     # C. Color Convert (颜色转换) - 移到这里做！
                     rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
-                    
+
                     # D. 转为 PIL Image 对象 (这是 CPU 密集型操作，在这里做)
                     pil_image = Image.fromarray(rgb_frame)
-                    
+
                     # --- 耗时操作结束 ---
 
                     # 2. 通知主线程显示 (只传递处理好的 pil_image)
                     if self.multi_video_active:
-                        self.master.after(0, self.update_ui_final, sender, pil_image)
-            
+                        self.master.after(
+                            0, self.update_ui_final, sender, pil_image)
+
             except Exception as e:
                 # 打印错误但不退出线程
                 print(f"后台处理线程出错: {e}")
     # ====================【第二步修改结束】====================
+
     def handle_file_receive(self, file_message):
         """处理接收到的文件"""
         try:
@@ -988,9 +993,10 @@ class ChatClientGUI:
                         try:
                             # put_nowait 是关键！如果队列满了(处理不过来)，直接丢弃这一帧
                             # 这样永远不会导致内存爆炸或延迟累积
-                            self.video_process_queue.put_nowait((sender, video_data))
+                            self.video_process_queue.put_nowait(
+                                (sender, video_data))
                         except queue.Full:
-                            pass # 队列满，丢弃该帧（这是正常的丢帧策略）
+                            pass  # 队列满，丢弃该帧（这是正常的丢帧策略）
                         # ====================【第三步修改结束】====================
             except IndexError:
                 print(f"多人视频数据格式错误: {message}")
@@ -1962,9 +1968,14 @@ class ChatClientGUI:
     def setup_udp_socket(self):
         """设置UDP套接字用于视频传输"""
         # 关闭现有的UDP套接字
-        if self.udp_socket:
-            self.udp_socket.close()
-
+        try:
+            # 尝试做一个非破坏性的操作来测试 socket 是否有效
+            self.udp_socket.fileno()
+            print("UDP套接字已存在，复用现有套接字")
+            return
+        except:
+            # 如果出错，说明旧的坏了，才清理掉
+            self.udp_socket = None
         # 创建用于发送视频数据的UDP套接字
         self.udp_socket = udp_socket_module.socket(
             udp_socket_module.AF_INET, udp_socket_module.SOCK_DGRAM)
@@ -2113,8 +2124,36 @@ class ChatClientGUI:
             while self.video_call_active or self.multi_video_active:
                 try:
                     # 设置短超时以允许定期检查video_call_active状态
-                    self.udp_socket.settimeout(0.5)  # 0.5秒超时
-                    data, addr = self.udp_socket.recvfrom(65536)  # 接收最大64KB数据
+                    if self.udp_socket:  # 加一个空值检查
+                        self.udp_socket.settimeout(0.5)
+                        data, addr = self.udp_socket.recvfrom(
+                            65536)  # 接收最大64KB数据
+
+                        # ... (中间原本的解码逻辑保持不变) ...
+                        # 原有的解码逻辑如下：
+                        decoded_data = data.decode('utf-8')
+                        parts = decoded_data.split(':', 1)
+                        if len(parts) == 2:
+                            sender = parts[0]
+                            image_data = parts[1]
+
+                            # 解码base64图像数据
+                            img_bytes = base64.b64decode(image_data)
+                            nparr = np.frombuffer(img_bytes, np.uint8)
+                            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+                            if frame is not None:
+                                if self.video_call_active:
+                                    # 更新远程视频帧（一对一视频通话）
+                                    self.remote_video_frame = frame
+
+                                    # 如果启用了OpenCV窗口，则更新远程视频帧
+                                    # 远程视频会在display_combined_video函数中显示在组合窗口中
+                                    pass
+                                elif self.multi_video_active:
+                                    # 更新多人视频会议中的参与者视频帧
+                                    self.update_participant_video(
+                                        sender, frame)
                     if data:
                         try:
                             # 解析数据格式: sender:image_data
@@ -2172,6 +2211,16 @@ class ChatClientGUI:
                 except socket.timeout:
                     # 超时是正常的，继续循环检查video_call_active
                     continue
+                # ====================【修改开始】====================
+                except OSError as e:
+                    # WinError 10038 是 socket 被关闭的正常现象，不是 bug
+                    if e.winerror == 10038 or e.errno == 10038:
+                        # Socket 被主线程关闭了，安静退出即可
+                        break
+                    else:
+                        print(f"接收UDP视频数据错误: {e}")
+                        break
+                # ====================【修改结束】====================
                 except Exception as e:
                     if not (self.video_call_active or self.multi_video_active):  # 如果视频通话已停止，则退出循环
                         break
