@@ -1727,6 +1727,10 @@ class ChatClientGUI:
         if self.local_video_cap:
             self.local_video_cap.release()
 
+        # 等待接收线程结束，确保在UDP套接字关闭前线程已退出
+        if self.video_recv_thread and self.video_recv_thread.is_alive():
+            self.video_recv_thread.join(timeout=2)
+
         # 关闭UDP套接字
         if self.udp_socket:
             self.udp_socket.close()
@@ -1737,9 +1741,6 @@ class ChatClientGUI:
             cv2.destroyAllWindows()
             # 等待线程自然结束，最多等待2秒
             self.combined_display_thread.join(timeout=2)
-
-        if self.video_recv_thread and self.video_recv_thread.is_alive():
-            self.video_recv_thread.join(timeout=2)
 
         # 最后在主线程中清理所有OpenCV窗口
         try:
@@ -1929,6 +1930,8 @@ class ChatClientGUI:
         try:
             while self.video_call_active:
                 try:
+                    # 设置短超时以允许定期检查video_call_active状态
+                    self.udp_socket.settimeout(0.5)  # 0.5秒超时
                     data, addr = self.udp_socket.recvfrom(65536)  # 接收最大64KB数据
                     if data:
                         try:
@@ -1953,6 +1956,9 @@ class ChatClientGUI:
                                     pass
                         except Exception as e:
                             print(f"UDP视频数据解析错误: {e}")
+                except socket.timeout:
+                    # 超时是正常的，继续循环检查video_call_active
+                    continue
                 except Exception as e:
                     if not self.video_call_active:  # 如果视频通话已停止，则退出循环
                         break

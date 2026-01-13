@@ -15,6 +15,7 @@ class ChatServerGUI:
         self.server_socket = None
         self.running = False
         self.clients = {}  # 存储客户端连接：socket -> username
+        self.video_calls = {}  # 存储视频通话配对：username -> partner_username
 
         # 创建界面组件
         self.create_widgets()
@@ -334,6 +335,9 @@ class ChatServerGUI:
                         sent = self.send_to_user(
                             target_user, f"/VIDEO_CALL_START|{username}")
                         if sent:
+                            # 记录视频通话配对关系
+                            self.video_calls[username] = target_user
+                            self.video_calls[target_user] = username
                             self.append_message(
                                 f"{target_user} 接受了 {username} 的视频通话")
                         else:
@@ -370,6 +374,11 @@ class ChatServerGUI:
                         sent = self.send_to_user(
                             target_user, f"/VIDEO_CALL_ENDED|{username}")
                         if sent:
+                            # 清除视频通话配对关系
+                            if username in self.video_calls:
+                                del self.video_calls[username]
+                            if target_user in self.video_calls:
+                                del self.video_calls[target_user]
                             self.append_message(
                                 f"{username} 与 {target_user} 的视频通话已结束")
                         else:
@@ -499,6 +508,19 @@ class ChatServerGUI:
             # 客户端下线
             if client_socket in self.clients:
                 username = self.clients[client_socket]
+
+                # 检查用户是否正在进行视频通话
+                if username in self.video_calls:
+                    # 通知视频通话伙伴用户已下线
+                    partner = self.video_calls[username]
+                    offline_msg = f"/VIDEO_CALL_ENDED|{username} (已离线)"
+                    self.send_to_user(partner, offline_msg)
+                    # 清除视频通话配对
+                    del self.video_calls[username]
+                    if partner in self.video_calls:
+                        del self.video_calls[partner]
+                    self.append_message(f"{username} 下线，已通知视频通话伙伴 {partner}")
+
                 del self.clients[client_socket]
 
                 # 更新客户端列表
