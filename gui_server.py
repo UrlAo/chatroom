@@ -105,7 +105,8 @@ class ChatServerGUI:
                 socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(
                 socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_socket.bind(("10.206.183.108", port))  # 修改此处，使用"0.0.0.0"而不是特定IP
+            # 修改此处，使用"0.0.0.0"而不是特定IP
+            self.server_socket.bind(("10.206.183.108", port))
             self.server_socket.listen(5)
 
             self.running = True
@@ -250,7 +251,7 @@ class ChatServerGUI:
                         self.append_message(
                             f"{username} 发送的文件格式不正确")
                         continue
-                    
+
                     # 检查是否是私聊文件消息
                     if msg.startswith('@'):
                         # 私聊文件消息格式：@target_user /FILE|filename|filesize|base64data
@@ -272,7 +273,8 @@ class ChatServerGUI:
                                     # 发送给发送者确认消息
                                     self.send_to_user(username, sender_msg)
                                     # 发送给接收者文件消息
-                                    self.send_to_user(target_user, receiver_msg)
+                                    self.send_to_user(
+                                        target_user, receiver_msg)
 
                                     self.append_message(
                                         f"{username} 私聊发送文件给 {target_user}")
@@ -297,46 +299,86 @@ class ChatServerGUI:
                 elif msg.startswith('/VIDEO_CALL_REQUEST|'):
                     # 处理视频通话请求
                     # 格式：/VIDEO_CALL_REQUEST|target_user
-                    target_user = msg.split('|')[1]
-                    # 检查目标用户是否存在
-                    target_exists = any(
-                        u == target_user for u in self.clients.values())
-                    if target_exists:
-                        # 发送给目标用户视频通话请求
-                        self.send_to_user(
-                            target_user, f"/VIDEO_CALL_INVITE|{username}")
-                        self.append_message(
-                            f"{username} 请求与 {target_user} 进行视频通话")
-                    else:
-                        # 目标用户不存在，发送错误消息给发起者
-                        error_msg = f"【系统】错误：用户 {target_user} 不在线"
-                        self.send_to_user(username, error_msg)
-                        self.append_message(
-                            f"{username} 尝试视频通话 {target_user}（用户不在线）")
+                    try:
+                        target_user = msg.split('|')[1]
+                        # 检查目标用户是否存在
+                        target_exists = any(
+                            u == target_user for u in self.clients.values())
+                        if target_exists:
+                            # 发送给目标用户视频通话请求
+                            sent = self.send_to_user(
+                                target_user, f"/VIDEO_CALL_INVITE|{username}")
+                            if sent:
+                                self.append_message(
+                                    f"{username} 请求与 {target_user} 进行视频通话")
+                            else:
+                                # 发送失败，通知发起者
+                                error_msg = f"【系统】错误：无法连接到 {target_user}"
+                                self.send_to_user(username, error_msg)
+                                self.append_message(
+                                    f"向 {target_user} 发送视频通话请求失败")
+                        else:
+                            # 目标用户不存在，发送错误消息给发起者
+                            error_msg = f"【系统】错误：用户 {target_user} 不在线"
+                            self.send_to_user(username, error_msg)
+                            self.append_message(
+                                f"{username} 尝试视频通话 {target_user}（用户不在线）")
+                    except Exception as e:
+                        self.append_message(f"处理视频通话请求时出错: {str(e)}")
                 elif msg.startswith('/VIDEO_CALL_ACCEPT|'):
                     # 处理视频通话接受
                     # 格式：/VIDEO_CALL_ACCEPT|target_user
-                    target_user = msg.split('|')[1]
-                    # 通知发起者对方接受了视频通话
-                    self.send_to_user(
-                        target_user, f"/VIDEO_CALL_START|{username}")
-                    self.append_message(f"{target_user} 接受了 {username} 的视频通话")
+                    try:
+                        target_user = msg.split('|')[1]
+                        # 通知发起者对方接受了视频通话
+                        sent = self.send_to_user(
+                            target_user, f"/VIDEO_CALL_START|{username}")
+                        if sent:
+                            self.append_message(
+                                f"{target_user} 接受了 {username} 的视频通话")
+                        else:
+                            # 发送失败，通知接受者
+                            error_msg = f"【系统】错误：无法通知 {target_user} 视频通话已被接受"
+                            self.send_to_user(username, error_msg)
+                            self.append_message(f"通知 {target_user} 视频通话接受失败")
+                    except Exception as e:
+                        self.append_message(f"处理视频通话接受时出错: {str(e)}")
                 elif msg.startswith('/VIDEO_CALL_REJECT|'):
                     # 处理视频通话拒绝
                     # 格式：/VIDEO_CALL_REJECT|target_user
-                    target_user = msg.split('|')[1]
-                    # 通知发起者对方拒绝了视频通话
-                    self.send_to_user(
-                        target_user, f"/VIDEO_CALL_REJECTED|{username}")
-                    self.append_message(f"{target_user} 拒绝了 {username} 的视频通话")
+                    try:
+                        target_user = msg.split('|')[1]
+                        # 通知发起者对方拒绝了视频通话
+                        sent = self.send_to_user(
+                            target_user, f"/VIDEO_CALL_REJECTED|{username}")
+                        if sent:
+                            self.append_message(
+                                f"{target_user} 拒绝了 {username} 的视频通话")
+                        else:
+                            # 发送失败，通知拒绝者
+                            error_msg = f"【系统】错误：无法通知 {target_user} 视频通话已被拒绝"
+                            self.send_to_user(username, error_msg)
+                            self.append_message(f"通知 {target_user} 视频通话拒绝失败")
+                    except Exception as e:
+                        self.append_message(f"处理视频通话拒绝时出错: {str(e)}")
                 elif msg.startswith('/VIDEO_CALL_END|'):
                     # 处理视频通话结束
                     # 格式：/VIDEO_CALL_END|target_user
-                    target_user = msg.split('|')[1]
-                    # 通知对方视频通话已结束
-                    self.send_to_user(
-                        target_user, f"/VIDEO_CALL_ENDED|{username}")
-                    self.append_message(f"{username} 与 {target_user} 的视频通话已结束")
+                    try:
+                        target_user = msg.split('|')[1]
+                        # 通知对方视频通话已结束
+                        sent = self.send_to_user(
+                            target_user, f"/VIDEO_CALL_ENDED|{username}")
+                        if sent:
+                            self.append_message(
+                                f"{username} 与 {target_user} 的视频通话已结束")
+                        else:
+                            # 发送失败，通知发起结束者
+                            error_msg = f"【系统】错误：无法通知 {target_user} 视频通话已结束"
+                            self.send_to_user(username, error_msg)
+                            self.append_message(f"通知 {target_user} 视频通话结束失败")
+                    except Exception as e:
+                        self.append_message(f"处理视频通话结束时出错: {str(e)}")
                 elif msg.startswith('/VIDEO_DATA|'):
                     # 处理视频数据
                     # 格式：/VIDEO_DATA|target_user|video_data
@@ -350,6 +392,95 @@ class ChatServerGUI:
                         # 服务器不记录视频数据，以保护隐私
                     except IndexError:
                         self.append_message(f"视频数据格式错误: {username}")
+                elif msg.startswith('/MULTI_VIDEO_INVITE|'):
+                    # 处理多人视频会议邀请
+                    # 格式：/MULTI_VIDEO_INVITE|room_id|inviter
+                    try:
+                        parts = msg.split('|', 2)
+                        room_id = parts[1]
+                        inviter = parts[2]
+
+                        # 广播邀请给所有用户（除了发起者）
+                        invite_msg = f"/MULTI_VIDEO_INVITE|{room_id}|{inviter}"
+                        self.broadcast(invite_msg, client_socket)
+
+                        self.append_message(f"{inviter} 发起了多人视频会议，邀请所有在线用户")
+                    except IndexError:
+                        self.append_message(f"多人视频邀请格式错误: {username}")
+                elif msg.startswith('/MULTI_VIDEO_JOIN|'):
+                    # 处理多人视频会议加入
+                    # 格式：/MULTI_VIDEO_JOIN|room_id|username
+                    try:
+                        parts = msg.split('|', 2)
+                        room_id = parts[1]
+                        joining_user = parts[2]
+
+                        # 广播给同一房间的其他参与者
+                        join_msg = f"/MULTI_VIDEO_JOIN|{room_id}|{joining_user}"
+                        # 只发送给同一房间的其他用户
+                        for client_sock, user_name in self.clients.items():
+                            if user_name != joining_user:  # 不发送给发起者
+                                self.send_message(client_sock, join_msg)
+
+                        self.append_message(f"{joining_user} 加入了多人视频会议")
+                    except IndexError:
+                        self.append_message(f"多人视频加入格式错误: {username}")
+                elif msg.startswith('/MULTI_VIDEO_LEAVE|'):
+                    # 处理多人视频会议离开
+                    # 格式：/MULTI_VIDEO_LEAVE|room_id|username
+                    try:
+                        parts = msg.split('|', 2)
+                        room_id = parts[1]
+                        leaving_user = parts[2]
+
+                        # 广播给同一房间的其他参与者
+                        leave_msg = f"/MULTI_VIDEO_LEAVE|{room_id}|{leaving_user}"
+                        # 只发送给同一房间的其他用户
+                        for client_sock, user_name in self.clients.items():
+                            if user_name != leaving_user:  # 不发送给离开者
+                                self.send_message(client_sock, leave_msg)
+
+                        self.append_message(f"{leaving_user} 离开了多人视频会议")
+                    except IndexError:
+                        self.append_message(f"多人视频离开格式错误: {username}")
+                elif msg.startswith('/MULTI_VIDEO_DATA|'):
+                    # 处理多人视频数据
+                    # 格式：/MULTI_VIDEO_DATA|room_id|sender|video_data
+                    try:
+                        parts = msg.split('|', 3)  # 分割为4部分
+                        room_id = parts[1]
+                        sender = parts[2]
+                        video_data = parts[3]
+
+                        # 转发给同一房间的其他参与者
+                        video_forward = f"/MULTI_VIDEO_DATA|{room_id}|{sender}|{video_data}"
+                        # 只转发给房间内的其他用户
+                        for client_sock, user_name in self.clients.items():
+                            if user_name != sender:  # 不转发给自己
+                                self.send_message(client_sock, video_forward)
+
+                        # 服务器不记录视频数据，以保护隐私
+                    except IndexError:
+                        self.append_message(f"多人视频数据格式错误: {username}")
+                elif msg.startswith('/CAMERA_STATUS|'):
+                    # 处理摄像头状态更新
+                    # 格式：/CAMERA_STATUS|room_id|username|status
+                    try:
+                        parts = msg.split('|', 3)
+                        room_id = parts[1]
+                        user_name = parts[2]
+                        status = parts[3]
+
+                        # 转发给同一房间的其他参与者
+                        status_msg = f"/CAMERA_STATUS|{room_id}|{user_name}|{status}"
+                        for client_sock, client_user_name in self.clients.items():
+                            if client_user_name != user_name:  # 不转发给状态更改者
+                                self.send_message(client_sock, status_msg)
+
+                        # 不在聊天室显示摄像头状态更新，只在服务器后台记录
+                        # self.append_message(f"{user_name} 摄像头状态变为: {status}")
+                    except IndexError:
+                        self.append_message(f"摄像头状态格式错误: {username}")
                 elif msg == '/REQUEST_USERLIST':
                     # 处理用户列表请求
                     current_users = list(self.clients.values())
