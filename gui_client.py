@@ -1636,9 +1636,9 @@ class ChatClientGUI:
             return
 
         # 设置摄像头参数以减少资源消耗
-        self.local_video_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-        self.local_video_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-        self.local_video_cap.set(cv2.CAP_PROP_FPS, 15)
+        self.local_video_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 160)
+        self.local_video_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 120)
+        self.local_video_cap.set(cv2.CAP_PROP_FPS, 10)
 
         # 初始化OpenCV视频窗口
         self.initialize_cv2_video_windows()
@@ -1847,9 +1847,9 @@ class ChatClientGUI:
             return
 
         # 设置摄像头参数以减少资源消耗
-        self.local_video_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-        self.local_video_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-        self.local_video_cap.set(cv2.CAP_PROP_FPS, 15)
+        self.local_video_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 160)
+        self.local_video_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 120)
+        self.local_video_cap.set(cv2.CAP_PROP_FPS, 10)
 
         # 发送加入消息
         join_msg = f"/MULTI_VIDEO_JOIN|{room_id}|{self.username}"
@@ -1925,7 +1925,7 @@ class ChatClientGUI:
                 continue
 
             # 编码帧为JPEG
-            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 40]  # 进一步降低质量以减少带宽
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 25]  # 进一步降低质量以减少带宽
             result, encoded_image = cv2.imencode('.jpg', frame, encode_param)
             if result:
                 # 转换为base64编码并发送
@@ -1994,7 +1994,8 @@ class ChatClientGUI:
             if self.camera_enabled:  # 只在摄像头开启时发送视频
                 # 编码帧为JPEG
                 # 适当降低质量以减少带宽
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 35]  # 稍微降低质量
+                # 显著降低质量以减少带宽
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 20]
                 result, encoded_image = cv2.imencode(
                     '.jpg', frame, encode_param)
                 if result:
@@ -2029,6 +2030,11 @@ class ChatClientGUI:
         try:
             while self.video_call_active or self.multi_video_active:
                 try:
+                    # 检查UDP套接字是否存在且有效
+                    if not hasattr(self, 'udp_socket') or self.udp_socket is None:
+                        time.sleep(0.1)  # 等待套接字初始化
+                        continue
+
                     # 设置短超时以允许定期检查video_call_active状态
                     self.udp_socket.settimeout(0.5)  # 0.5秒超时
                     data, addr = self.udp_socket.recvfrom(65536)  # 接收最大64KB数据
@@ -2093,11 +2099,14 @@ class ChatClientGUI:
                     if not (self.video_call_active or self.multi_video_active):  # 如果视频通话已停止，则退出循环
                         break
                     print(f"接收UDP视频数据错误: {e}")
+                    # 套接字可能已关闭，稍等后继续
+                    time.sleep(0.1)
         except Exception as e:
             print(f"接收UDP视频时出错: {e}")
         finally:
             # 设置停止事件
-            self.remote_display_stopped.set()
+            if hasattr(self, 'remote_display_stopped'):
+                self.remote_display_stopped.set()
             # 不在这里调用destroyAllWindows，避免多线程冲突
             pass
 
@@ -2210,6 +2219,9 @@ class ChatClientGUI:
             self.video_thread = threading.Thread(
                 target=self.transmit_multi_video, daemon=True)
             self.video_thread.start()
+
+            # 重新设置UDP套接字
+            self.setup_udp_socket()
 
             print("多人视频会议已刷新")
 
@@ -2467,7 +2479,7 @@ class ChatClientGUI:
         """在Tkinter标签中更新参与者视频"""
         try:
             # 调整帧大小以适应显示区域
-            resized_frame = cv2.resize(frame, (240, 180))
+            resized_frame = cv2.resize(frame, (160, 120))
             # 转换颜色格式从BGR到RGB
             rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
             # 转换为Tkinter兼容的PhotoImage格式
@@ -2535,7 +2547,7 @@ class ChatClientGUI:
 
                 if local_widget:
                     # 调整帧大小以适应显示区域
-                    resized_frame = cv2.resize(frame, (240, 180))
+                    resized_frame = cv2.resize(frame, (160, 120))
                     # 转换颜色格式从BGR到RGB
                     rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
                     # 转换为Tkinter兼容的PhotoImage格式
