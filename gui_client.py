@@ -1000,6 +1000,22 @@ class ChatClientGUI:
                         # ====================【第三步修改结束】====================
             except IndexError:
                 print(f"多人视频数据格式错误: {message}")
+        elif message.startswith("/MULTI_VIDEO_REFRESH|"):
+            # 多人视频会议刷新请求
+            # 格式：/MULTI_VIDEO_REFRESH|room_id|username
+            try:
+                parts = message.split('|', 2)
+                room_id = parts[1]
+                username = parts[2]
+
+                # 只处理当前房间的刷新请求
+                if self.multi_video_active and self.multi_video_room_id == room_id:
+                    print(f"{username} 请求刷新视频会议")
+                    # 重新请求用户列表，获取所有会议成员信息
+                    self.master.after(
+                        0, lambda: self.send_message_raw('/REQUEST_USERLIST'))
+            except IndexError:
+                print(f"多人视频刷新格式错误: {message}")
         elif message.startswith("/CAMERA_STATUS|"):
             # 摄像头状态更新
             # 格式：/CAMERA_STATUS|room_id|username|status
@@ -2326,7 +2342,7 @@ class ChatClientGUI:
         self.send_message_raw(camera_status_msg)
 
     def refresh_multi_video(self):
-        """刷新多人视频会议中的视频显示，清空现有视频帧并重启传输"""
+        """刷新多人视频会议中的视频显示，清空现有视频帧并重启传输，同时重新请求参与者列表"""
         if self.multi_video_active:
             print("正在刷新多人视频会议...")
 
@@ -2347,6 +2363,13 @@ class ChatClientGUI:
                     setattr(self, '_stopping_transmission', True)
 
                 self.video_thread.join(timeout=2)
+
+            # 请求最新用户列表，获取所有会议成员信息
+            self.send_message_raw('/REQUEST_USERLIST')
+
+            # 发送一个特殊的刷新请求给房间内其他成员
+            refresh_msg = f"/MULTI_VIDEO_REFRESH|{self.multi_video_room_id}|{self.username}"
+            self.send_message_raw(refresh_msg)
 
             # 重新启动视频传输
             self.video_thread = threading.Thread(
