@@ -475,7 +475,7 @@ class ChatClientGUI:
 
         # 获取服务器地址和端口
         server_ip = simpledialog.askstring(
-            "服务器地址", "请输入服务器IP地址:", initialvalue="192.168.110.64")
+            "服务器地址", "请输入服务器IP地址:", initialvalue="192.168.110.107")
         if not server_ip:
             return
 
@@ -620,7 +620,6 @@ class ChatClientGUI:
                 if not raw_len:
                     self.add_message_to_history("聊天室", "系统: 服务器连接已关闭")
                     break
-
 
                 msg_len = struct.unpack('!I', raw_len)[0]
 
@@ -1510,27 +1509,29 @@ class ChatClientGUI:
 
         # 分割主框架为上下两部分
         # 上半部分：自己的主视频窗口
-        self.self_video_frame = tk.Frame(main_frame, bg="#000000", relief=tk.RAISED, bd=1)
+        self.self_video_frame = tk.Frame(
+            main_frame, bg="#000000", relief=tk.RAISED, bd=1)
         self.self_video_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # 创建自己的视频标签
         self.self_video_label = tk.Label(self.self_video_frame, text=f"我 ({self.username})", bg="#000000",
-                                       fg="white", font=("Microsoft YaHei", 12))
+                                         fg="white", font=("Microsoft YaHei", 12))
         self.self_video_label.pack(expand=True, fill=tk.BOTH)
-        
+
         # 存储自己的视频标签引用
         if self.username not in self.multi_video_participants:
             self.multi_video_participants[self.username] = {
                 'frame': None, 'udp_port': None, 'widget': self.self_video_label}
         else:
             self.multi_video_participants[self.username]['widget'] = self.self_video_label
-        
+
         # 立即尝试更新本地视频帧
         self.update_local_video_in_tkinter(self.self_video_label)
 
         # 下半部分：其他参与者的视频网格
         self.others_video_frame = tk.Frame(main_frame, bg="#F5F5F5")
-        self.others_video_frame.pack(fill=tk.BOTH, expand=False, padx=5, pady=5)
+        self.others_video_frame.pack(
+            fill=tk.BOTH, expand=False, padx=5, pady=5)
 
         # 添加控制按钮
         control_frame = tk.Frame(self.multi_video_window)
@@ -1541,11 +1542,16 @@ class ChatClientGUI:
                                            bg="#FF6B6B", fg="white", font=("Microsoft YaHei", 10))
         self.camera_toggle_btn.pack(side=tk.LEFT, padx=5)
 
+        # 刷新视频按钮
+        refresh_btn = tk.Button(control_frame, text="刷新视频", command=self.refresh_multi_video,
+                                bg="#FFD700", fg="black", font=("Microsoft YaHei", 10))
+        refresh_btn.pack(side=tk.LEFT, padx=5)
+
         # 离开会议按钮
         leave_btn = tk.Button(control_frame, text="离开会议", command=self.leave_multi_video_call,
                               bg="#4ECDC4", fg="white", font=("Microsoft YaHei", 10))
         leave_btn.pack(side=tk.RIGHT, padx=5)
-        
+
         # 初始化其他参与者的视频布局
         self.update_others_video_layout()
 
@@ -1654,8 +1660,6 @@ class ChatClientGUI:
         """初始化多人视频会议的显示（使用Tkinter）"""
         # 直接更新UI显示，不需要额外线程
         self.update_video_layout()
-
-
 
     def display_combined_video(self):
         """显示组合视频（主视频+小视频）到单个OpenCV窗口"""
@@ -1869,7 +1873,7 @@ class ChatClientGUI:
         # 关闭现有的UDP套接字
         if self.udp_socket:
             self.udp_socket.close()
-        
+
         # 创建用于发送视频数据的UDP套接字
         self.udp_socket = udp_socket_module.socket(
             udp_socket_module.AF_INET, udp_socket_module.SOCK_DGRAM)
@@ -1877,14 +1881,15 @@ class ChatClientGUI:
         self.udp_socket.bind(('', 0))
         self.local_udp_port = self.udp_socket.getsockname()[1]
         print(f"UDP套接字绑定到端口: {self.local_udp_port}")
-        
+
         # 为多方视频会议创建专门的发送套接字
         if self.multi_video_send_socket:
             self.multi_video_send_socket.close()
         self.multi_video_send_socket = udp_socket_module.socket(
             udp_socket_module.AF_INET, udp_socket_module.SOCK_DGRAM)
         self.multi_video_send_socket.bind(('', 0))
-        print(f"多方视频发送套接字绑定到端口: {self.multi_video_send_socket.getsockname()[1]}")
+        print(
+            f"多方视频发送套接字绑定到端口: {self.multi_video_send_socket.getsockname()[1]}")
 
         # 启动接收线程
         self.video_recv_thread = Thread(
@@ -1986,10 +1991,11 @@ class ChatClientGUI:
                     try:
                         # 尝试通过UDP发送（如果服务器支持）
                         # UDP格式: username:image_data
-                        udp_packet = f"{self.username}:{image_data}".encode('utf-8')
+                        udp_packet = f"{self.username}:{image_data}".encode(
+                            'utf-8')
                         # 这里需要知道服务器的UDP地址和端口，暂时使用TCP
                         # self.udp_socket.sendto(udp_packet, (server_addr, server_udp_port))
-                        
+
                         # 目前还是使用TCP发送以确保可靠性
                         self.send_message_raw(video_data)
                     except Exception as e:
@@ -2031,7 +2037,8 @@ class ChatClientGUI:
                                         pass
                                     elif self.multi_video_active:
                                         # 更新多人视频会议中的参与者视频帧
-                                        self.update_participant_video(sender, frame)
+                                        self.update_participant_video(
+                                            sender, frame)
                         except Exception as e:
                             print(f"UDP视频数据解析错误: {e}")
                             # 尝试解析TCP格式的多人视频数据
@@ -2043,17 +2050,21 @@ class ChatClientGUI:
                                         room_id = parts[1]
                                         sender = parts[2]
                                         image_data = parts[3]
-                                        
+
                                         # 检查是否是当前房间的数据
                                         if self.multi_video_active and self.multi_video_room_id == room_id:
                                             # 解码base64图像数据
-                                            img_bytes = base64.b64decode(image_data)
-                                            nparr = np.frombuffer(img_bytes, np.uint8)
-                                            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                                            
+                                            img_bytes = base64.b64decode(
+                                                image_data)
+                                            nparr = np.frombuffer(
+                                                img_bytes, np.uint8)
+                                            frame = cv2.imdecode(
+                                                nparr, cv2.IMREAD_COLOR)
+
                                             if frame is not None:
                                                 # 更新多人视频会议中的参与者视频帧
-                                                self.update_participant_video(sender, frame)
+                                                self.update_participant_video(
+                                                    sender, frame)
                             except Exception as tcp_parse_error:
                                 print(f"解析TCP格式多人视频数据错误: {tcp_parse_error}")
                 except socket.timeout:
@@ -2129,6 +2140,30 @@ class ChatClientGUI:
         camera_status_msg = f"/CAMERA_STATUS|{self.multi_video_room_id}|{self.username}|{status}"
         self.send_message_raw(camera_status_msg)
 
+    def refresh_multi_video(self):
+        """刷新多人视频会议中的视频显示，重新请求所有参与者视频数据"""
+        if self.multi_video_active:
+            # 重新请求所有参与者列表
+            print("正在刷新多人视频会议...")
+
+            # 重新请求加入消息以同步参与者列表
+            join_msg = f"/MULTI_VIDEO_JOIN|{self.multi_video_room_id}|{self.username}"
+            self.send_message_raw(join_msg)
+
+            # 重新更新视频布局
+            self.update_video_layout()
+
+            # 重启视频传输线程
+            if self.video_thread and self.video_thread.is_alive():
+                self.video_thread.join(timeout=1)
+
+            # 重新启动视频传输
+            self.video_thread = threading.Thread(
+                target=self.transmit_multi_video, daemon=True)
+            self.video_thread.start()
+
+            print("多人视频会议已刷新")
+
     def leave_multi_video_call(self):
         """离开多人视频会议"""
         if self.multi_video_active:
@@ -2146,11 +2181,11 @@ class ChatClientGUI:
             # 关闭UDP套接字
             if self.udp_socket:
                 self.udp_socket.close()
-            
+
             # 关闭多方视频专用的UDP套接字
             if self.multi_video_send_socket:
                 self.multi_video_send_socket.close()
-            
+
             # 关闭所有参与者的UDP套接字
             for sock in self.multi_video_udp_sockets.values():
                 try:
@@ -2158,7 +2193,7 @@ class ChatClientGUI:
                 except:
                     pass
             self.multi_video_udp_sockets.clear()
-            
+
             # 停止所有参与者的接收线程
             for thread in self.multi_video_recv_threads.values():
                 # 这里不强制停止线程，而是设置标志位让它们自然退出
@@ -2201,24 +2236,25 @@ class ChatClientGUI:
             # 如果还没有分割框架，则使用旧方法
             if not self.multi_video_window or not self.multi_video_window.winfo_exists():
                 return
-    
+
             # 清空现有视频显示框架
             for child in self.multi_video_window.winfo_children():
                 if 'video_frame' in str(child).lower():
                     child.destroy()
                     break
-    
+
             # 重新创建视频显示框架
             video_frame = tk.Frame(self.multi_video_window, bg="#F5F5F5")
             video_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-    
+
             # 计算网格布局
             num_participants = 0
             # 计算实际有多少参与者（包括自己）
             if self.local_video_cap:
                 num_participants += 1
-            num_participants += len([u for u in self.multi_video_participants if u != self.username])
-    
+            num_participants += len(
+                [u for u in self.multi_video_participants if u != self.username])
+
             # 根据参与者数量计算网格布局
             if num_participants <= 1:
                 cols, rows = 1, 1
@@ -2232,59 +2268,60 @@ class ChatClientGUI:
                 cols, rows = 3, 3
             else:
                 cols, rows = 4, (num_participants + 3) // 4
-    
+
             # 配置网格权重
             for i in range(rows):
                 video_frame.grid_rowconfigure(i, weight=1)
             for j in range(cols):
                 video_frame.grid_columnconfigure(j, weight=1)
-    
+
             idx = 0
-    
+
             # 首先添加自己的视频（如果有摄像头）
             if self.local_video_cap and self.camera_enabled:
                 local_frame = tk.Frame(
                     video_frame, bg="#000000", relief=tk.RAISED, bd=1)
                 local_frame.grid(row=idx//cols, column=idx %
                                  cols, padx=2, pady=2, sticky="nsew")
-    
+
                 # 创建本地视频标签
                 local_label = tk.Label(local_frame, text=f"我 ({self.username})", bg="#000000",
                                        fg="white", font=("Microsoft YaHei", 9))
                 local_label.pack(expand=True, fill=tk.BOTH)
-    
+
                 # 存储标签引用
                 if self.username not in self.multi_video_participants:
                     self.multi_video_participants[self.username] = {
                         'frame': None, 'udp_port': None, 'widget': local_label}
                 else:
                     self.multi_video_participants[self.username]['widget'] = local_label
-                
+
                 # 立即尝试更新本地视频帧
                 self.update_local_video_in_tkinter(local_label)
                 idx += 1
-    
+
             # 添加其他参与者的视频
             for username, info in self.multi_video_participants.items():
                 if username == self.username:
                     continue
-    
+
                 participant_frame = tk.Frame(
                     video_frame, bg="#000000", relief=tk.RAISED, bd=1)
                 participant_frame.grid(row=idx//cols, column=idx %
                                        cols, padx=2, pady=2, sticky="nsew")
-    
+
                 # 创建参与者视频标签
                 participant_label = tk.Label(participant_frame, text=username, bg="#000000",
                                              fg="white", font=("Microsoft YaHei", 9))
                 participant_label.pack(expand=True, fill=tk.BOTH)
-    
+
                 # 存储标签引用
                 info['widget'] = participant_label
-                
+
                 # 如果已有视频帧，立即更新显示
                 if info['frame'] is not None:
-                    self.update_participant_video_in_tkinter(participant_label, info['frame'])
+                    self.update_participant_video_in_tkinter(
+                        participant_label, info['frame'])
                 idx += 1
 
     def update_others_video_layout(self):
@@ -2297,12 +2334,13 @@ class ChatClientGUI:
             widget.destroy()
 
         # 获取其他参与者列表
-        other_participants = [u for u in self.multi_video_participants if u != self.username]
-        
+        other_participants = [
+            u for u in self.multi_video_participants if u != self.username]
+
         if not other_participants:
             # 如果没有其他参与者，显示提示信息
-            hint_label = tk.Label(self.others_video_frame, text="暂无其他参与者", 
-                                bg="#F5F5F5", fg="#999999", font=("Microsoft YaHei", 10))
+            hint_label = tk.Label(self.others_video_frame, text="暂无其他参与者",
+                                  bg="#F5F5F5", fg="#999999", font=("Microsoft YaHei", 10))
             hint_label.pack(expand=True, fill=tk.BOTH)
             return
 
@@ -2333,7 +2371,7 @@ class ChatClientGUI:
 
             participant_frame = tk.Frame(
                 self.others_video_frame, bg="#000000", relief=tk.RAISED, bd=1)
-            participant_frame.grid(row=row_idx, column=col_idx, 
+            participant_frame.grid(row=row_idx, column=col_idx,
                                    padx=2, pady=2, sticky="nsew")
 
             # 创建参与者视频标签
@@ -2343,10 +2381,11 @@ class ChatClientGUI:
 
             # 存储标签引用
             info['widget'] = participant_label
-            
+
             # 如果已有视频帧，立即更新显示
             if info['frame'] is not None:
-                self.update_participant_video_in_tkinter(participant_label, info['frame'])
+                self.update_participant_video_in_tkinter(
+                    participant_label, info['frame'])
 
     def update_local_video_in_tkinter(self, widget):
         """在Tkinter标签中更新本地视频"""
@@ -2360,13 +2399,14 @@ class ChatClientGUI:
                 # 转换为Tkinter兼容的PhotoImage格式
                 img = Image.fromarray(rgb_frame)
                 photo = ImageTk.PhotoImage(image=img)
-                
+
                 # 更新视频显示
                 widget.configure(image=photo, text="")
                 widget.image = photo  # 保持引用，防止被垃圾回收
-                
+
                 # 每30毫秒更新一次本地视频
-                widget.after(30, lambda: self.update_local_video_in_tkinter(widget))
+                widget.after(
+                    30, lambda: self.update_local_video_in_tkinter(widget))
 
     def update_participant_video_in_tkinter(self, widget, frame):
         """在Tkinter标签中更新参与者视频"""
@@ -2377,7 +2417,7 @@ class ChatClientGUI:
         # 转换为Tkinter兼容的PhotoImage格式
         img = Image.fromarray(rgb_frame)
         photo = ImageTk.PhotoImage(image=img)
-        
+
         # 更新视频显示
         widget.configure(image=photo, text="")
         widget.image = photo  # 保持引用，防止被垃圾回收
