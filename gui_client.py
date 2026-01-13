@@ -906,9 +906,9 @@ class ChatClientGUI:
                     video_data = parts[3]
                     # 只处理当前房间的数据
                     if self.multi_video_active and self.multi_video_room_id == room_id:
-                        # 在主线程中处理多人视频数据
-                        self.master.after(0, self.receive_multi_video_data,
-                                          sender, video_data)
+                        # 在后台线程直接解码，不占用主线程CPU
+                        threading.Thread(target=self.decode_and_update_video, args=(
+                            sender, video_data), daemon=True).start()
             except IndexError:
                 print(f"多人视频数据格式错误: {message}")
         elif message.startswith("/CAMERA_STATUS|"):
@@ -1533,8 +1533,8 @@ class ChatClientGUI:
         else:
             self.multi_video_participants[self.username]['widget'] = self.self_video_label
 
-        # 立即尝试更新本地视频帧
-        self.update_local_video_in_tkinter(self.self_video_label)
+        # 立即尝试更新本地视频帧（现在由传输线程处理）
+        pass
 
         # 下半部分：其他参与者的视频网格
         self.others_video_frame = tk.Frame(main_frame, bg="#F5F5F5")
@@ -2018,6 +2018,9 @@ class ChatClientGUI:
                         print(f"发送多人视频数据失败: {e}")
                         break
 
+            # 顺便通知主线程更新自己的画面，不需要单独的 after 循环
+            self.master.after(0, self.update_local_video_ui, frame)
+
             last_send_time = current_time
             time.sleep(0.067)  # 15fps的延迟，与UI更新同步
 
@@ -2142,6 +2145,36 @@ class ChatClientGUI:
 
             except Exception as e:
                 print(f"多人视频解码错误: {e}")
+
+    def decode_and_update_video(self, sender, video_data):
+        """在后台线程解码视频数据并通知主线程更新UI"""
+        try:
+            img_bytes = base64.b64decode(video_data)
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+            if frame is not None:
+                # 只有解码成功了，才把"成品"矩阵传给主线程去显示
+                # 注意：这里传递的是 numpy 数组 (frame)，不是字符串
+                self.master.after(
+                    0, self.update_participant_video_ui_only, sender, frame)
+        except Exception as e:
+            print(f"后台解码失败: {e}")
+
+    def update_participant_video_ui_only(self, sender, frame):
+        """只负责更新UI，不负责解码，减轻主线程压力"""
+        if self.multi_video_active:
+            # 更新参与者视频帧
+            if sender in self.multi_video_participants:
+                self.multi_video_participants[sender]['frame'] = frame
+                # 更新UI中的视频显示
+                self.update_participant_video(sender, frame)
+            else:
+                # 如果是新参与者，添加到列表
+                self.multi_video_participants[sender] = {
+                    'frame': frame, 'udp_port': None, 'widget': None}
+                # 更新布局
+                self.update_video_layout()
 
     def toggle_camera(self):
         """切换摄像头状态"""
@@ -2333,8 +2366,8 @@ class ChatClientGUI:
                 else:
                     self.multi_video_participants[self.username]['widget'] = local_label
 
-                # 立即尝试更新本地视频帧
-                self.update_local_video_in_tkinter(local_label)
+                # 立即尝试更新本地视频帧（现在由传输线程处理）
+                pass
                 idx += 1
 
             # 添加其他参与者的视频
@@ -2424,26 +2457,11 @@ class ChatClientGUI:
                 self.update_participant_video_in_tkinter(
                     participant_label, info['frame'])
 
-    def update_local_video_in_tkinter(self, widget):
-        """在Tkinter标签中更新本地视频"""
-        if self.local_video_cap and self.camera_enabled:
-            ret, frame = self.local_video_cap.read()
-            if ret:
-                # 调整帧大小以适应显示区域
-                resized_frame = cv2.resize(frame, (240, 180))
-                # 转换颜色格式从BGR到RGB
-                rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
-                # 转换为Tkinter兼容的PhotoImage格式
-                img = Image.fromarray(rgb_frame)
-                photo = ImageTk.PhotoImage(image=img)
-
-                # 更新视频显示
-                widget.configure(image=photo, text="")
-                widget.image = photo  # 保持引用，防止被垃圾回收
-
-                # 每67毫秒更新一次本地视频 (约15 FPS)
-                widget.after(
-                    67, lambda: self.update_local_video_in_tkinter(widget))
+#     def update_local_video_in_tkinter(self, widget):
+#         """在Tkinter标签中更新本地视频（已弃用，使用新的线程机制）"""
+#         # 此方法已被弃用，因为其递归调用widget.after()机制可能导致UI阻塞
+#         # 新的实现使用传输线程直接更新UI，避免了递归调用
+#         pass
 
     def update_participant_video_in_tkinter(self, widget, frame):
         """在Tkinter标签中更新参与者视频"""
@@ -2504,6 +2522,31 @@ class ChatClientGUI:
 
         except Exception as e:
             print(f"更新参与者视频失败: {e}")
+
+    def update_local_video_ui(self, frame):
+        """更新本地视频UI，由传输线程调用"""
+        if self.multi_video_window and self.multi_video_window.winfo_exists():
+            try:
+                # 获取本地视频标签
+                local_widget = None
+                if self.username in self.multi_video_participants:
+                    local_widget = self.multi_video_participants[self.username].get(
+                        'widget')
+
+                if local_widget:
+                    # 调整帧大小以适应显示区域
+                    resized_frame = cv2.resize(frame, (240, 180))
+                    # 转换颜色格式从BGR到RGB
+                    rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
+                    # 转换为Tkinter兼容的PhotoImage格式
+                    img = Image.fromarray(rgb_frame)
+                    photo = ImageTk.PhotoImage(image=img)
+
+                    # 更新视频显示
+                    local_widget.configure(image=photo, text="")
+                    local_widget.image = photo  # 保持引用，防止被垃圾回收
+            except Exception as e:
+                print(f"更新本地视频UI失败: {e}")
 
 
 def main():
