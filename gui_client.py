@@ -2326,28 +2326,27 @@ class ChatClientGUI:
         self.send_message_raw(camera_status_msg)
 
     def refresh_multi_video(self):
-        """刷新多人视频会议中的视频显示，重新请求所有参与者视频数据"""
+        """刷新多人视频会议中的视频显示，清空现有视频帧并重启传输"""
         if self.multi_video_active:
-            # 重新请求所有参与者列表
             print("正在刷新多人视频会议...")
 
-            # 先停止当前的视频传输线程
+            # 清空所有参与者的视频帧缓存
+            self.video_frame_buffer.clear()
+            self.last_frame_time.clear()
+
+            # 为所有现有参与者重置视频帧
+            for username in self.multi_video_participants:
+                self.multi_video_participants[username]['frame'] = None
+
+            # 重启视频传输线程（不重新加入会议）
             if self.video_thread and self.video_thread.is_alive():
-                # 设置一个临时标志来帮助线程退出
+                # 设置停止标志并等待当前线程结束
                 if hasattr(self, '_stopping_transmission'):
                     self._stopping_transmission = True
                 else:
                     setattr(self, '_stopping_transmission', True)
 
-                # 等待当前线程结束
                 self.video_thread.join(timeout=2)
-
-            # 重新请求加入消息以同步参与者列表
-            join_msg = f"/MULTI_VIDEO_JOIN|{self.multi_video_room_id}|{self.username}"
-            self.send_message_raw(join_msg)
-
-            # 重新更新视频布局
-            self.update_video_layout()
 
             # 重新启动视频传输
             self.video_thread = threading.Thread(
@@ -2356,6 +2355,9 @@ class ChatClientGUI:
             if hasattr(self, '_stopping_transmission'):
                 delattr(self, '_stopping_transmission')
             self.video_thread.start()
+
+            # 重新更新视频布局
+            self.update_video_layout()
 
             print("多人视频会议已刷新")
 
