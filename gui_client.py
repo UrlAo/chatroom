@@ -36,6 +36,11 @@ class ChatClientGUI:
         self.current_chat = "聊天室"  # 当前聊天对象，默认为公共聊天室
         self.username = ""  # 初始化用户名
 
+        # 视频帧缓存，用于优化多人视频会议性能
+        self.video_frame_buffer = {}
+        self.last_frame_time = {}  # 记录每个用户最后更新时间
+        self.frame_update_interval = 0.067  # 15 FPS的时间间隔
+
         # 存储不同聊天对象的消息（消息格式：字符串或字典{"type": "file", "text": "...", "file_path": "..."}）
         self.chat_history = {"聊天室": []}
 
@@ -1499,6 +1504,9 @@ class ChatClientGUI:
         self.multi_video_window.title(f"多人视频会议 - {self.multi_video_room_id}")
         self.multi_video_window.geometry("800x600")
 
+        # 禁用窗口最大化，避免布局混乱
+        self.multi_video_window.resizable(True, True)
+
         # 设置窗口关闭事件
         self.multi_video_window.protocol(
             "WM_DELETE_WINDOW", self.leave_multi_video_call)
@@ -1956,20 +1964,28 @@ class ChatClientGUI:
             time.sleep(0.033)  # 30fps的延迟
 
     def transmit_multi_video(self):
-        """传输多人视频数据"""
+        """传输多人视频数据，优化帧率和带宽使用"""
         # 设置UDP套接字
         self.setup_udp_socket()
 
         last_send_time = time.time()
-        SEND_INTERVAL = 0.2  # 限制发送间隔为0.2秒（5fps）
+        last_cleanup_time = time.time()
+        CLEANUP_INTERVAL = 2.0  # 每2秒清理一次过期帧
+        SEND_INTERVAL = 0.1  # 限制发送间隔为0.1秒（10fps），平衡流畅度和带宽
 
         while self.multi_video_active and self.local_video_cap:
             ret, frame = self.local_video_cap.read()
             if not ret:
-                time.sleep(0.033)  # 30fps的延迟
+                time.sleep(0.067)  # 15fps的延迟
                 continue
 
             current_time = time.time()
+
+            # 定期清理过期帧
+            if current_time - last_cleanup_time > CLEANUP_INTERVAL:
+                self.cleanup_old_frames()
+                last_cleanup_time = current_time
+
             # 控制发送频率
             if current_time - last_send_time < SEND_INTERVAL:
                 time.sleep(0.033)  # 30fps的延迟
@@ -1977,8 +1993,8 @@ class ChatClientGUI:
 
             if self.camera_enabled:  # 只在摄像头开启时发送视频
                 # 编码帧为JPEG
-                # 进一步降低质量以减少带宽
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 40]
+                # 适当降低质量以减少带宽
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 35]  # 稍微降低质量
                 result, encoded_image = cv2.imencode(
                     '.jpg', frame, encode_param)
                 if result:
@@ -2003,7 +2019,7 @@ class ChatClientGUI:
                         break
 
             last_send_time = current_time
-            time.sleep(0.033)  # 30fps的延迟
+            time.sleep(0.067)  # 15fps的延迟，与UI更新同步
 
     def receive_video_via_udp(self):
         """通过UDP接收视频数据"""
@@ -2214,8 +2230,29 @@ class ChatClientGUI:
             self.multi_video_participants.clear()
             self.multi_video_layout.clear()
 
+            # 清理视频帧缓冲
+            self.video_frame_buffer.clear()
+            self.last_frame_time.clear()
+
             # 通知用户
             self.add_message_to_history("聊天室", f"系统: 您已离开视频会议")
+
+    def cleanup_old_frames(self):
+        """清理过期的视频帧，防止内存泄漏"""
+        current_time = time.time()
+        expired_users = []
+
+        # 查找过期的帧
+        for username, last_time in self.last_frame_time.items():
+            if current_time - last_time > 5.0:  # 如果超过5秒没有更新
+                expired_users.append(username)
+
+        # 删除过期的缓冲帧
+        for username in expired_users:
+            if username in self.video_frame_buffer:
+                del self.video_frame_buffer[username]
+            if username in self.last_frame_time:
+                del self.last_frame_time[username]
 
     def start_multi_video_stream(self):
         """开始多人视频流"""
@@ -2404,34 +2441,60 @@ class ChatClientGUI:
                 widget.configure(image=photo, text="")
                 widget.image = photo  # 保持引用，防止被垃圾回收
 
-                # 每30毫秒更新一次本地视频
+                # 每67毫秒更新一次本地视频 (约15 FPS)
                 widget.after(
-                    30, lambda: self.update_local_video_in_tkinter(widget))
+                    67, lambda: self.update_local_video_in_tkinter(widget))
 
     def update_participant_video_in_tkinter(self, widget, frame):
         """在Tkinter标签中更新参与者视频"""
-        # 调整帧大小以适应显示区域
-        resized_frame = cv2.resize(frame, (240, 180))
-        # 转换颜色格式从BGR到RGB
-        rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
-        # 转换为Tkinter兼容的PhotoImage格式
-        img = Image.fromarray(rgb_frame)
-        photo = ImageTk.PhotoImage(image=img)
+        try:
+            # 调整帧大小以适应显示区域
+            resized_frame = cv2.resize(frame, (240, 180))
+            # 转换颜色格式从BGR到RGB
+            rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
+            # 转换为Tkinter兼容的PhotoImage格式
+            img = Image.fromarray(rgb_frame)
+            photo = ImageTk.PhotoImage(image=img)
 
-        # 更新视频显示
-        widget.configure(image=photo, text="")
-        widget.image = photo  # 保持引用，防止被垃圾回收
+            # 更新视频显示
+            widget.configure(image=photo, text="")
+            widget.image = photo  # 保持引用，防止被垃圾回收
+        except Exception as e:
+            print(f"更新参与者视频UI失败: {e}")
 
     def update_participant_video(self, username, frame):
-        """更新特定参与者的视频显示"""
+        """更新特定参与者的视频显示，使用缓冲机制避免频繁UI更新"""
         try:
+            current_time = time.time()
+
+            # 检查是否超过了更新间隔时间
+            if username in self.last_frame_time:
+                elapsed = current_time - self.last_frame_time[username]
+                if elapsed < self.frame_update_interval:
+                    # 如果未超过更新间隔，将帧存入缓冲区
+                    self.video_frame_buffer[username] = frame
+                    return
+
+            # 更新时间戳
+            self.last_frame_time[username] = current_time
+
             # 更新参与者的视频帧数据
             if username in self.multi_video_participants:
                 self.multi_video_participants[username]['frame'] = frame
-                # 如果widget存在，立即更新显示
+                # 如果widget存在，更新显示
                 widget = self.multi_video_participants[username].get('widget')
                 if widget:
                     self.update_participant_video_in_tkinter(widget, frame)
+
+                # 检查缓冲区是否有待处理的帧（使用最新的帧）
+                if username in self.video_frame_buffer:
+                    buffered_frame = self.video_frame_buffer[username]
+                    self.multi_video_participants[username]['frame'] = buffered_frame
+                    if widget:
+                        self.update_participant_video_in_tkinter(
+                            widget, buffered_frame)
+                    # 清除缓冲区中的帧
+                    del self.video_frame_buffer[username]
             else:
                 # 如果是新参与者，添加到列表
                 self.multi_video_participants[username] = {
