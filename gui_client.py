@@ -2068,6 +2068,10 @@ class ChatClientGUI:
         SEND_INTERVAL = 0.1  # 限制发送间隔为0.1秒（10fps），平衡流畅度和带宽
 
         while self.multi_video_active and self.local_video_cap:
+            # 检查是否需要停止传输（刷新或其他停止操作）
+            if hasattr(self, '_stopping_transmission') and getattr(self, '_stopping_transmission'):
+                break
+
             ret, frame = self.local_video_cap.read()
             if not ret:
                 time.sleep(0.067)  # 15fps的延迟
@@ -2327,6 +2331,17 @@ class ChatClientGUI:
             # 重新请求所有参与者列表
             print("正在刷新多人视频会议...")
 
+            # 先停止当前的视频传输线程
+            if self.video_thread and self.video_thread.is_alive():
+                # 设置一个临时标志来帮助线程退出
+                if hasattr(self, '_stopping_transmission'):
+                    self._stopping_transmission = True
+                else:
+                    setattr(self, '_stopping_transmission', True)
+
+                # 等待当前线程结束
+                self.video_thread.join(timeout=2)
+
             # 重新请求加入消息以同步参与者列表
             join_msg = f"/MULTI_VIDEO_JOIN|{self.multi_video_room_id}|{self.username}"
             self.send_message_raw(join_msg)
@@ -2334,13 +2349,12 @@ class ChatClientGUI:
             # 重新更新视频布局
             self.update_video_layout()
 
-            # 重启视频传输线程
-            if self.video_thread and self.video_thread.is_alive():
-                self.video_thread.join(timeout=1)
-
             # 重新启动视频传输
             self.video_thread = threading.Thread(
                 target=self.transmit_multi_video, daemon=True)
+            # 清除临时停止标志
+            if hasattr(self, '_stopping_transmission'):
+                delattr(self, '_stopping_transmission')
             self.video_thread.start()
 
             print("多人视频会议已刷新")
@@ -2351,6 +2365,16 @@ class ChatClientGUI:
             # 发送离开消息
             leave_msg = f"/MULTI_VIDEO_LEAVE|{self.multi_video_room_id}|{self.username}"
             self.send_message_raw(leave_msg)
+
+            # 设置停止标志，让传输线程可以安全退出
+            if hasattr(self, '_stopping_transmission'):
+                self._stopping_transmission = True
+            else:
+                setattr(self, '_stopping_transmission', True)
+
+            # 重置线程
+            if self.video_thread and self.video_thread.is_alive():
+                self.video_thread.join(timeout=2)
 
             # 停止视频流
             self.multi_video_active = False
@@ -2386,10 +2410,6 @@ class ChatClientGUI:
                 self.multi_video_window.destroy()
                 self.multi_video_window = None
 
-            # 重置线程
-            if self.video_thread and self.video_thread.is_alive():
-                self.video_thread.join(timeout=1)
-
             # 重置变量
             self.multi_video_room_id = None
             self.multi_video_participants.clear()
@@ -2398,6 +2418,10 @@ class ChatClientGUI:
             # 清理视频帧缓冲
             self.video_frame_buffer.clear()
             self.last_frame_time.clear()
+
+            # 清除停止标志
+            if hasattr(self, '_stopping_transmission'):
+                delattr(self, '_stopping_transmission')
 
             # 通知用户
             self.add_message_to_history("聊天室", f"系统: 您已离开视频会议")
