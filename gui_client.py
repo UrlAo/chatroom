@@ -468,7 +468,7 @@ class ChatClientGUI:
 
         # 获取服务器地址和端口
         server_ip = simpledialog.askstring(
-            "服务器地址", "请输入服务器IP地址:", initialvalue="192.168.110.64")
+            "服务器地址", "请输入服务器IP地址:", initialvalue="10.206.183.108")
         if not server_ip:
             return
 
@@ -919,7 +919,7 @@ class ChatClientGUI:
             for chat_target in self.chat_history:
                 if chat_target != "聊天室":
                     self.add_message_to_history(chat_target, message)
-        else:
+        elif not "/UDP_PORT" in message:  # 修改此行以排除包含UDP_PORT的消息
             # 普通群聊消息
             self.add_message_to_history("聊天室", message)
 
