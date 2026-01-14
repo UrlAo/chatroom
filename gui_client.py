@@ -35,8 +35,14 @@ class ChatClientGUI:
         self.connected = False
         self.current_chat = "聊天室"  # 当前聊天对象，默认为公共聊天室
         self.username = ""  # 初始化用户名
+        
+        # 添加心跳检测相关变量
+        self.last_activity_time = time.time()  # 记录最后一次活动时间
+        self.heartbeat_check_interval = 1000  # 每秒检查一次时间（毫秒）
+        self.inactive_timeout = 5 * 60  # 5分钟无操作超时（秒）
+        self.heartbeat_check_id = None  # 用于存储心跳检查的after ID
 
-        # 存储不同聊天对象的消息（消息格式：字符串或字典{"type": "file", "text": "...", "file_path": "..."}）
+        # 存储不同聊天对象的消息（消息格式：字符串或字典{"type": "file", "text": "...", "file_path": "..."})
         self.chat_history = {"聊天室": []}
 
         # 创建文件存储目录
@@ -103,365 +109,156 @@ class ChatClientGUI:
 
         # 创建界面组件
         self.create_widgets()
+        
+        # 绑定键盘和鼠标事件以追踪用户活动
+        self.bind_user_activity_events()
 
-    def create_widgets(self):
-        # 创建菜单栏
-        menubar = tk.Menu(self.master)
-        self.master.config(menu=menubar)
+    def bind_user_activity_events(self):
+        """绑定用户活动事件，用于追踪用户操作"""
+        # 绑定键盘事件
+        self.master.bind("<Key>", self.on_user_activity)
+        # 绑定鼠标移动事件
+        self.master.bind("<Motion>", self.on_user_activity)
+        # 绑定鼠标点击事件
+        self.master.bind("<Button-1>", self.on_user_activity)
+        self.master.bind("<Button-2>", self.on_user_activity)
+        self.master.bind("<Button-3>", self.on_user_activity)
+        # 绑定鼠标滚轮事件
+        self.master.bind("<MouseWheel>", self.on_user_activity)
+        # 绑定焦点事件
+        self.master.bind("<FocusIn>", self.on_user_activity)
+        self.master.bind("<FocusOut>", self.on_user_activity)
 
-        # 连接菜单
-        connection_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="连接", menu=connection_menu)
-        connection_menu.add_command(
-            label="连接到服务器", command=self.connect_to_server)
-        connection_menu.add_command(
-            label="断开连接", command=self.disconnect_from_server)
+    def on_user_activity(self, event=None):
+        """用户活动回调函数，更新最后活动时间"""
+        self.last_activity_time = time.time()
+        
+        # 如果当前显示的是活动超时提醒窗口，则关闭它
+        if hasattr(self, 'inactive_warning_window') and self.inactive_warning_window:
+            try:
+                self.inactive_warning_window.destroy()
+                self.inactive_warning_window = None
+            except tk.TclError:
+                pass  # 窗口可能已经被销毁
 
-        # 视频通话菜单
-        video_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="视频通话", menu=video_menu)
-        video_menu.add_command(
-            label="发起视频通话", command=self.initiate_video_call)
-        video_menu.add_command(
-            label="接听视频通话", command=self.answer_video_call)
-        video_menu.add_command(
-            label="挂断视频通话", command=self.end_video_call)
+    def start_heartbeat_check(self):
+        """开始心跳检测"""
+        if self.heartbeat_check_id:
+            self.master.after_cancel(self.heartbeat_check_id)
+        
+        self.last_activity_time = time.time()  # 重置最后活动时间
+        self.check_inactivity()
 
-        # 配置主窗口的行和列权重，使其可缩放
-        self.master.grid_rowconfigure(0, weight=1)
-        self.master.grid_rowconfigure(1, weight=0)  # 状态栏行不扩展
-        self.master.grid_columnconfigure(0, weight=1)
+    def check_inactivity(self):
+        """检查用户是否长时间无操作"""
+        if not self.connected:
+            return
+            
+        current_time = time.time()
+        elapsed_time = current_time - self.last_activity_time
+        
+        if elapsed_time >= self.inactive_timeout:
+            # 用户长时间无操作，显示提醒窗口
+            self.show_inactive_warning()
+        else:
+            # 继续检查
+            self.heartbeat_check_id = self.master.after(
+                self.heartbeat_check_interval, 
+                self.check_inactivity
+            )
 
-        # 主框架（左右分栏）
-        main_frame = tk.PanedWindow(
-            self.master, orient=tk.HORIZONTAL, bg="#F5F5F5", sashwidth=2)
-        main_frame.grid(row=0, column=0, sticky="nsew")
+    def show_inactive_warning(self):
+        """显示长时间无操作提醒窗口"""
+        if hasattr(self, 'inactive_warning_window') and self.inactive_warning_window:
+            return  # 如果窗口已存在，则不重复创建
 
-        # 配置主框架权重
-        self.master.grid_rowconfigure(0, weight=1)
-        self.master.grid_columnconfigure(0, weight=1)
-
-        # 左侧框架（用户列表）
-        left_frame = tk.Frame(main_frame, bg="#EDEDED", width=250)
-        main_frame.add(left_frame, width=250, minsize=180)
-
-        # 配置左侧框架权重
-        left_frame.grid_rowconfigure(1, weight=1)
-        left_frame.grid_columnconfigure(0, weight=1)
-
-        # 用户列表标题栏
-        title_frame = tk.Frame(left_frame, bg="#393939", height=50)
-        title_frame.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
-        title_frame.grid_propagate(False)
-
-        title_label = tk.Label(title_frame, text="聊天", font=("Microsoft YaHei", 14, "bold"),
-                               fg="white", bg="#393939")
-        title_label.pack(pady=15)
-
-        # 用户列表框（美化样式）
-        listbox_frame = tk.Frame(left_frame, bg="#EDEDED")
-        listbox_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
-
-        # 配置列表框框架权重
-        listbox_frame.grid_rowconfigure(0, weight=1)
-        listbox_frame.grid_columnconfigure(0, weight=1)
-
-        self.users_listbox = tk.Listbox(listbox_frame,
-                                        font=("Microsoft YaHei", 11),
-                                        bg="white",
-                                        fg="#333333",
-                                        selectbackground="#C7E0F4",
-                                        selectforeground="#333333",
-                                        borderwidth=0,
-                                        highlightthickness=0,
-                                        activestyle="none")
-        self.users_listbox.grid(row=0, column=0, sticky="nsew")
-
-        # 添加"聊天室"选项
-        self.users_listbox.insert(tk.END, "💬 聊天室")
-
-        # 绑定点击事件
-        self.users_listbox.bind("<<ListboxSelect>>", self.select_chat_target)
-
-        # 刷新按钮
-        self.refresh_button = tk.Button(
-            left_frame,
-            text="🔄 刷新用户",
-            command=self.request_user_list,
-            font=("Microsoft YaHei", 10, "bold"),
-            bg="#E0E0E0",
-            fg="#333333",
-            activebackground="#D0D0D0",
-            activeforeground="#333333",
-            relief="flat",
-            borderwidth=0,
-            padx=10,
-            pady=5)
-        self.refresh_button.grid(
-            row=2, column=0, pady=(5, 0), padx=10, sticky="ew")
-
-        # 添加鼠标悬停效果
-        self.refresh_button.bind(
-            "<Enter>", lambda e: self.refresh_button.config(bg="#D0D0D0"))
-        self.refresh_button.bind(
-            "<Leave>", lambda e: self.refresh_button.config(bg="#E0E0E0"))
-
-        # 配置刷新按钮所在行的权重
-        left_frame.grid_rowconfigure(2, weight=0)
-
-        # 右侧框架（聊天区域）
-        right_frame = tk.Frame(main_frame, bg="#F5F5F5")
-        main_frame.add(right_frame)
-
-        # 配置右侧框架权重
-        right_frame.grid_rowconfigure(1, weight=1)
-        right_frame.grid_columnconfigure(0, weight=1)
-
-        # 聊天头部（类似微信）
-        header_frame = tk.Frame(right_frame, bg="#393939", height=60)
-        header_frame.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
-        header_frame.grid_propagate(False)
-
-        self.current_chat_label = tk.Label(header_frame,
-                                           text="聊天室",
-                                           font=("Microsoft YaHei",
-                                                 14, "bold"),
-                                           fg="white",
-                                           bg="#393939")
-        self.current_chat_label.pack(pady=18)
-
-        # 创建聊天内容容器（包含消息显示和输入区域）
-        chat_content_frame = tk.Frame(right_frame, bg="#F5F5F5")
-        chat_content_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
-
-        # 配置聊天内容框架权重
-        chat_content_frame.grid_rowconfigure(0, weight=1)  # 消息显示区域扩展
-        chat_content_frame.grid_rowconfigure(1, weight=0)  # 输入框不扩展
-        chat_content_frame.grid_columnconfigure(0, weight=1)
-
-        # 消息显示区域（微信风格背景）
-        self.messages_display = scrolledtext.ScrolledText(
-            chat_content_frame,
-            wrap=tk.WORD,
-            state=tk.DISABLED,
-            height=20,
-            bg="#F5F5F5",
-            fg="#333333",
-            font=("Microsoft YaHei", 11),
-            borderwidth=0,
-            highlightthickness=0,
-            padx=15,
-            pady=10,
-            spacing1=5,
-            spacing2=2,
-            spacing3=5,
-            cursor="arrow"  # 设置默认光标为箭头
+        # 创建提醒窗口
+        self.inactive_warning_window = tk.Toplevel(self.master)
+        self.inactive_warning_window.title("长时间无操作提醒")
+        self.inactive_warning_window.geometry("400x150")
+        self.inactive_warning_window.resizable(False, False)
+        
+        # 设置窗口始终置顶
+        self.inactive_warning_window.attributes('-topmost', True)
+        
+        # 居中显示窗口
+        self.center_window_on_screen(self.inactive_warning_window)
+        
+        # 添加提示信息
+        warning_label = tk.Label(
+            self.inactive_warning_window, 
+            text=f"您已经超过{self.inactive_timeout//60}分钟没有操作，\n是否继续保持连接？", 
+            font=("Microsoft YaHei", 12),
+            wraplength=350
         )
-        self.messages_display.grid(
-            row=0, column=0, sticky="nsew", padx=0, pady=0)
-
-        # 输入区域（微信风格）
-        input_frame = tk.Frame(chat_content_frame, bg="#F5F5F5")
-        input_frame.grid(row=1, column=0, sticky="ew", padx=0, pady=0)
-
-        # 配置输入框框架权重
-        chat_content_frame.grid_rowconfigure(1, weight=0)  # 输入框不扩展
-
-        # 配置输入框架的行权重
-        input_frame.grid_rowconfigure(0, weight=1)
-        input_frame.grid_columnconfigure(0, weight=1)
-
-        # 输入框容器
-        input_container = tk.Frame(input_frame, bg="white", relief="flat")
-        input_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-
-        # 配置输入容器权重
-        input_container.grid_rowconfigure(0, weight=1)
-        input_container.grid_columnconfigure(0, weight=1)
-
-        self.message_entry = tk.Entry(input_container,
-                                      font=("Microsoft YaHei", 11),
-                                      bg="white",
-                                      fg="#333333",
-                                      borderwidth=0,
-                                      highlightthickness=1,
-                                      highlightcolor="#07C160",
-                                      highlightbackground="#E0E0E0",
-                                      relief="flat")
-        self.message_entry.grid(
-            row=0, column=0, sticky="nsew", padx=10, pady=10)
-
-        # 配置输入框权重
-        input_container.grid_columnconfigure(0, weight=1)
-
-        self.message_entry.bind("<Return>", self.send_message)
-
-        # 按钮框架
-        button_frame = tk.Frame(input_container, bg="white")
-        button_frame.grid(row=0, column=1, sticky="ns", padx=5, pady=5)
-
-        self.send_file_button = tk.Button(
+        warning_label.pack(pady=20)
+        
+        # 添加按钮框架
+        button_frame = tk.Frame(self.inactive_warning_window)
+        button_frame.pack(pady=10)
+        
+        # 添加"保持连接"按钮
+        keep_connected_btn = tk.Button(
             button_frame,
-            text="📎",
-            command=self.send_file,
-            font=("Microsoft YaHei", 14),
-            bg="white",
-            fg="#666666",
-            activebackground="#F0F0F0",
-            activeforeground="white",
-            borderwidth=0,
-            relief="flat",
-            cursor="hand2",
-            width=3,
-            height=1
-        )
-        self.send_file_button.pack(side=tk.LEFT, padx=2)
-
-        self.video_call_button = tk.Button(
-            button_frame,
-            text="🎥",
-            command=self.initiate_video_call,
-            font=("Microsoft YaHei", 14),
-            bg="white",
-            fg="#666666",
-            activebackground="#F0F0F0",
-            activeforeground="white",
-            borderwidth=0,
-            relief="flat",
-            cursor="hand2",
-            width=3,
-            height=1
-        )
-        self.video_call_button.pack(side=tk.LEFT, padx=2)
-
-        self.send_button = tk.Button(
-            button_frame,
-            text="发送",
-            command=self.send_message,
-            font=("Microsoft YaHei", 11),
+            text="保持连接",
+            command=self.keep_connected,
+            font=("Microsoft YaHei", 10),
             bg="#07C160",
             fg="white",
-            activebackground="#06AD56",
-            activeforeground="white",
-            borderwidth=0,
-            relief="flat",
-            cursor="hand2",
-            padx=15,
-            pady=5
+            width=10
         )
-        self.send_button.pack(side=tk.LEFT, padx=2)
-
-        # 配置消息样式tag
-        # 发送的消息（右侧，微信绿色背景）
-        self.messages_display.tag_config("message_sent",
-                                         background="#95EC69",
-                                         foreground="#000000",
-                                         lmargin1=200,  # 左边距，控制消息整体位置
-                                         lmargin2=200,  # 左边距，控制消息整体位置
-                                         rmargin=20,   # 右边距
-                                         spacing1=5,
-                                         spacing2=0,
-                                         spacing3=5,
-                                         relief="flat",
-                                         borderwidth=8,
-                                         wrap="word",
-                                         justify="right",
-                                         offset=10)  # 添加偏移以模拟圆角效果
-
-        # 接收的消息（左侧，微信白色背景）
-        self.messages_display.tag_config("message_received",
-                                         background="#FFFFFF",
-                                         foreground="#000000",
-                                         lmargin1=20,   # 左边距
-                                         lmargin2=20,   # 左边距
-                                         rmargin=200,  # 右边距，控制消息整体位置
-                                         spacing1=5,
-                                         spacing2=0,
-                                         spacing3=5,
-                                         relief="flat",
-                                         borderwidth=8,
-                                         wrap="word",
-                                         justify="left",
-                                         offset=10)  # 添加偏移以模拟圆角效果
-
-        # 用户名样式
-        self.messages_display.tag_config("username",
-                                         font=("Microsoft YaHei", 10, "bold"),
-                                         foreground="#000000")
-
-        # 发送消息的用户名（右侧）
-        self.messages_display.tag_config("username_sent",
-                                         font=("Microsoft YaHei", 10, "bold"),
-                                         foreground="#000000",
-                                         lmargin1=200,  # 左边距，控制用户名整体位置
-                                         lmargin2=200,  # 左边距，控制用户名整体位置
-                                         rmargin=20,   # 右边距
-                                         spacing1=0,
-                                         spacing2=0,
-                                         spacing3=0,
-                                         justify="right")
-
-        # 接收消息的用户名（左侧）
-        self.messages_display.tag_config("username_received",
-                                         font=("Microsoft YaHei", 10, "bold"),
-                                         foreground="#000000",
-                                         lmargin1=20,   # 左边距
-                                         lmargin2=20,   # 左边距
-                                         rmargin=200,  # 右边距，控制用户名整体位置
-                                         spacing1=0,
-                                         spacing2=0,
-                                         spacing3=0,
-                                         justify="left")
-
-        # 系统消息（居中，灰色）
-        self.messages_display.tag_config("message_system",
-                                         foreground="#999999",
-                                         justify="center",
-                                         font=("Microsoft YaHei", 9),
-                                         lmargin1=50,
-                                         lmargin2=50,
-                                         rmargin=50)
-
-        # 时间戳样式（居中，小字体）
-        self.messages_display.tag_config("timestamp",
-                                         foreground="#999999",
-                                         justify="center",
-                                         font=("Microsoft YaHei", 9),
-                                         lmargin1=0,
-                                         lmargin2=0,
-                                         rmargin=0,
-                                         spacing1=5,
-                                         spacing2=2,
-                                         spacing3=5)
-
-        # 移除文件链接样式，因为我们现在使用按钮
-        # 原来的文件链接样式代码已移除
-
-        # 绑定鼠标移动事件，用于动态管理光标
-        # 由于不再使用链接样式，移除了动态光标变化
-        self.messages_display.bind(
-            "<Leave>", lambda e: self.messages_display.config(cursor="arrow"))
-
-        # 状态栏（微信风格）
-        self.status_bar = tk.Label(
-            self.master,
-            text="● 未连接",
-            font=("Microsoft YaHei", 9),
-            bg="#F5F5F5",
-            fg="#999999",
-            bd=0,
-            relief="flat",
-            anchor=tk.W,
-            padx=10,
-            pady=5
+        keep_connected_btn.pack(side=tk.LEFT, padx=10)
+        
+        # 添加"断开连接"按钮
+        disconnect_btn = tk.Button(
+            button_frame,
+            text="断开连接",
+            command=self.disconnect_from_server,
+            font=("Microsoft YaHei", 10),
+            bg="#FF6B6B",
+            fg="white",
+            width=10
         )
-        self.status_bar.grid(row=1, column=0, sticky="ew", padx=0, pady=0)
+        disconnect_btn.pack(side=tk.LEFT, padx=10)
+        
+        # 绑定窗口关闭事件，自动选择断开连接
+        self.inactive_warning_window.protocol("WM_DELETE_WINDOW", self.disconnect_from_server)
+        
+        # 当用户进行任何操作时，自动关闭警告窗口
+        self.bind_warning_window_events()
 
-        # 绑定窗口关闭事件
-        self.master.protocol("WM_DELETE_WINDOW", self.on_closing)
+    def center_window_on_screen(self, window):
+        """将窗口居中显示在屏幕上"""
+        window.update_idletasks()
+        x = (window.winfo_screenwidth() // 2) - (window.winfo_width() // 2)
+        y = (window.winfo_screenheight() // 2) - (window.winfo_height() // 2)
+        window.geometry(f"+{x}+{y}")
 
-        # 绑定窗口大小调整事件，确保响应式布局
-        self.master.bind("<Configure>", self.on_window_resize)
+    def bind_warning_window_events(self):
+        """为警告窗口绑定事件，当用户操作时关闭警告"""
+        if not hasattr(self, 'inactive_warning_window') or not self.inactive_warning_window:
+            return
+
+        # 为警告窗口本身绑定事件
+        self.inactive_warning_window.bind("<Key>", self.on_user_activity)
+        self.inactive_warning_window.bind("<Button-1>", self.on_user_activity)
+        self.inactive_warning_window.bind("<ButtonRelease-1>", self.on_user_activity)
+        self.inactive_warning_window.bind("<MouseWheel>", self.on_user_activity)
+
+    def keep_connected(self):
+        """用户选择保持连接时的操作"""
+        if hasattr(self, 'inactive_warning_window') and self.inactive_warning_window:
+            self.inactive_warning_window.destroy()
+            self.inactive_warning_window = None
+        
+        # 更新最后活动时间
+        self.last_activity_time = time.time()
+        
+        # 继续检查后续活动
+        self.heartbeat_check_id = self.master.after(
+            self.heartbeat_check_interval, 
+            self.check_inactivity
+        )
 
     def connect_to_server(self):
         if self.connected:
@@ -475,7 +272,7 @@ class ChatClientGUI:
 
         # 获取服务器地址和端口
         server_ip = simpledialog.askstring(
-            "服务器地址", "请输入服务器IP地址:", initialvalue="192.168.110.107")
+            "服务器地址", "请输入服务器IP地址:", initialvalue="10.206.183.108")
         if not server_ip:
             return
 
@@ -510,6 +307,9 @@ class ChatClientGUI:
             self.update_status(
                 f"已连接到 {server_ip}:{server_port} - 用户名: {username}")
             self.add_message_to_history("聊天室", "系统: 已成功连接到聊天室")
+            
+            # 开始心跳检测
+            self.start_heartbeat_check()
 
         except Exception as e:
             messagebox.showerror("连接错误", f"无法连接到服务器: {str(e)}")
@@ -520,6 +320,11 @@ class ChatClientGUI:
         if not self.connected:
             messagebox.showinfo("信息", "当前未连接到服务器！")
             return
+
+        # 取消心跳检查
+        if self.heartbeat_check_id:
+            self.master.after_cancel(self.heartbeat_check_id)
+            self.heartbeat_check_id = None
 
         try:
             # 发送退出消息
@@ -532,6 +337,17 @@ class ChatClientGUI:
                 self.client_socket.close()
             self.update_status("已断开连接")
             self.add_message_to_history("聊天室", "系统: 已断开与聊天室的连接")
+
+    def on_closing(self):
+        """窗口关闭事件处理"""
+        # 取消心跳检查
+        if self.heartbeat_check_id:
+            self.master.after_cancel(self.heartbeat_check_id)
+            self.heartbeat_check_id = None
+            
+        if self.connected:
+            self.disconnect_from_server()
+        self.master.destroy()
 
     def send_message_raw(self, message):  # 发送原始消息
         """发送原始消息到服务器"""
